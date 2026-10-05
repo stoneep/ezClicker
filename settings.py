@@ -15,7 +15,7 @@ settings.py — 확장 단계 설정.
 """
 
 import bpy
-from bpy.props import BoolProperty, EnumProperty
+from bpy.props import BoolProperty, EnumProperty, IntProperty
 
 from . import state
 
@@ -40,7 +40,50 @@ def _on_settings_update(self, context):
     state.reset_wheel()
 
 
+# 고정 패널(사이드바)의 숫자칸. 값은 state.adjust 에서 읽고(휠 확장과 항상 일치), 바꾸면 조절 오퍼레이터를 부른다.
+# 일반 숫자칸이라 클릭 드래그, 좌우 화살표, 직접 입력이 모두 된다.
+def _adjust_getter(key):
+    def get(self):
+        adj = state.adjust
+        if adj is None:
+            return 1 if key == 'keep' else 0
+        if key == 'keep':
+            return adj['keep'] or adj['total'] or 1
+        return adj[key]
+    return get
+
+
+def _adjust_setter(target, key):
+    def set_(self, value):
+        adj = state.adjust
+        if adj is None or value == _adjust_getter(key)(self):
+            return
+        try:
+            bpy.ops.mesh.mirror_loop_adjust('EXEC_DEFAULT', target=target, value=value)
+        except RuntimeError:        # 편집 모드가 아니거나 선택이 바뀌어 조절할 수 없는 상태
+            pass
+    return set_
+
+
 class MLS_Settings(bpy.types.PropertyGroup):
+    adjust_up: IntProperty(
+        name="폭: 위쪽 루프",
+        description="클릭한 루프에서 화면 위쪽으로 나란한 루프를 몇 줄 더 선택할지 (드래그/화살표/입력)",
+        min=0, max=50,
+        get=_adjust_getter('up'), set=_adjust_setter('UP', 'up'),
+    )
+    adjust_down: IntProperty(
+        name="폭: 아래쪽 루프",
+        description="클릭한 루프에서 화면 아래쪽으로 나란한 루프를 몇 줄 더 선택할지 (드래그/화살표/입력)",
+        min=0, max=50,
+        get=_adjust_getter('down'), set=_adjust_setter('DOWN', 'down'),
+    )
+    adjust_length: IntProperty(
+        name="길이: 엣지 수",
+        description="루프를 따라 선택할 엣지 수. 클릭한 엣지를 가운데로 줄어든다. 루프 전체 길이보다 크면 전체로 맞춘다",
+        min=1, max=100000, soft_max=500,
+        get=_adjust_getter('keep'), set=_adjust_setter('LENGTH', 'keep'),
+    )
     level: EnumProperty(
         name="확장 단계",
         description="루프 선택 확장 기능을 어디까지 쓸지 정한다",

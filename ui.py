@@ -60,7 +60,7 @@ class MESH_OT_mirror_loop_level(bpy.types.Operator):
 
 POPUP_IDNAME = "wm.call_panel"      # 팝업을 여는 키맵 항목의 오퍼레이터
 PANEL_IDNAME = "mesh.mirror_loop_panel"      # 고정 패널(사이드바 탭)을 여닫는 키맵 항목의 오퍼레이터
-ADJUST_IDNAME = "mesh.mirror_loop_adjust"    # 고정 패널의 +/- 버튼 오퍼레이터
+ADJUST_IDNAME = "mesh.mirror_loop_adjust"    # 고정 패널 숫자칸/버튼이 부르는 오퍼레이터
 KEY_ROW_IDNAMES = (POPUP_IDNAME, PANEL_IDNAME)     # 기능 목록 대신 위쪽 '키 입력 행'으로 따로 그리는 항목
 
 
@@ -144,24 +144,6 @@ def draw_panel_body(layout, s, editable=True):
 # 고정 패널: 사이드바(N) > Mirror Loop 탭
 # ---------------------------------------------------------------------------
 
-def adjust_row(layout, text, target, value_text, can_minus, can_plus, step=1):
-    """'이름   [-]  값  [+]' 한 줄. 숫자는 가운데 글자로 보여주고, 버튼은 mesh.mirror_loop_adjust 를 부른다."""
-    col = layout.column(align=True)
-    col.label(text=text)
-    row = col.row(align=True)
-    minus = row.row(align=True)
-    minus.enabled = can_minus
-    op = minus.operator(ADJUST_IDNAME, text="", icon='REMOVE')
-    op.target, op.delta = target, -step
-    mid = row.row(align=True)
-    mid.alignment = 'CENTER'
-    mid.label(text=value_text)
-    plus = row.row(align=True)
-    plus.enabled = can_plus
-    op = plus.operator(ADJUST_IDNAME, text="", icon='ADD')
-    op.target, op.delta = target, step
-
-
 def draw_adjust(layout, context):
     """고정 패널 본문. state.adjust (마지막 루프 선택)의 값을 보여주고 +/- 로 바꾼다."""
     entry = popup_entry(PANEL_IDNAME)
@@ -181,16 +163,14 @@ def draw_adjust(layout, context):
 
         layout.operator(ADJUST_IDNAME, text="링 (Ring)", icon='MOD_ARRAY', depress=ring).target = 'RING'
 
-        col = layout.column()
+        # 숫자칸: 클릭 드래그, 좌우 화살표, 더블클릭 입력이 모두 된다. (값은 state.adjust 와 항상 일치)
+        s = get_settings(context)
+        col = layout.column(align=True)
         col.enabled = not ring        # 링은 폭/길이를 쓰지 않는다
-        adjust_row(col, "폭: 위쪽 루프", 'UP', str(adj['up']),
-                   adj['up'] > 0, adj['up'] < 50)
-        adjust_row(col, "폭: 아래쪽 루프", 'DOWN', str(adj['down']),
-                   adj['down'] > 0, adj['down'] < 50)
+        col.prop(s, "adjust_up")
+        col.prop(s, "adjust_down")
         total = adj['total']
-        keep = adj['keep'] or total
-        adjust_row(col, "길이: 엣지", 'LENGTH', f"{keep} / {total}" if keep != total else f"전체 ({total})",
-                   keep > 1, keep < total)
+        col.prop(s, "adjust_length", text=f"길이: 엣지 수 (전체 {total})")
         col.operator(ADJUST_IDNAME, text="폭·길이 초기화", icon='LOOP_BACK').target = 'RESET'
 
     layout.separator()

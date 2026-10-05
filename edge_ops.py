@@ -378,6 +378,9 @@ class MESH_OT_mirror_loop_adjust(bpy.types.Operator):
         default='UP',
     )
     delta: IntProperty(name="Delta", default=1, min=-ADJUST_STEP_MAX, max=ADJUST_STEP_MAX)
+    # 0 이상이면 delta 대신 이 값으로 바로 정한다. (패널의 숫자칸 드래그/입력용)
+    # 폭: 줄 수 / 길이: 남길 엣지 수(1~전체)
+    value: IntProperty(name="Value", default=-1, min=-1, options={'SKIP_SAVE'})
 
     @classmethod
     def poll(cls, context):
@@ -394,13 +397,15 @@ class MESH_OT_mirror_loop_adjust(bpy.types.Operator):
 
         p = SimpleNamespace(**adj['params'])
         t, d = self.target, self.delta
+        absolute = self.value >= 0
         if t == 'UP':
-            p.steps_up = min(max(p.steps_up + d, 0), ADJUST_STEP_MAX)
+            p.steps_up = min(max(self.value if absolute else p.steps_up + d, 0), ADJUST_STEP_MAX)
         elif t == 'DOWN':
-            p.steps_down = min(max(p.steps_down + d, 0), ADJUST_STEP_MAX)
+            p.steps_down = min(max(self.value if absolute else p.steps_down + d, 0), ADJUST_STEP_MAX)
         elif t == 'LENGTH':
             lowest = max(ADJUST_LENGTH_MIN, -(adj['total'] - 1)) if adj['total'] else 0
-            p.length_adjust = min(max(p.length_adjust + d, lowest), 0)
+            want = (self.value - adj['total']) if absolute else p.length_adjust + d
+            p.length_adjust = min(max(want, lowest), 0)
         elif t == 'RING':
             p.use_ring = not p.use_ring
         else:
