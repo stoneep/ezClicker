@@ -23,7 +23,7 @@ from mathutils import Vector
 from . import state
 from .common import (ensure_tables, face_only_mode, get_mirror_axes, mesh_counts, pick_seed,
                      restore_selection, snapshot_selection)
-from .edge_core import find_mirror_edges, walk_loop
+from .edge_core import find_mirror_edges, trimmed_loop, walk_loop
 from .edge_range import (apply_range, build_offset, new_wheel_state, state_valid,
                          step_both_sides, step_one_side)
 from .face_core import init_faces
@@ -57,14 +57,20 @@ class MESH_OT_mirror_loop_select(bpy.types.Operator):
     )
     # 선택 직후 왼쪽 아래에 뜨는 '마지막 작업 조정' 패널에서 +/- 로 조절한다. (휠 확장과 같은 동작)
     steps_up: IntProperty(
-        name="위쪽 루프 (+/-)",
-        description="클릭한 루프에서 화면 위쪽으로 루프를 몇 줄 더 선택할지",
+        name="폭: 위쪽 루프 (+/-)",
+        description="클릭한 루프에서 화면 위쪽으로 나란한 루프를 몇 줄 더 선택할지 (루프의 폭)",
         default=0, min=0, max=50, options={'SKIP_SAVE'},   # soft_max 를 따로 두지 않아야 +/- 화살표도 끝까지(50) 올라간다
     )
     steps_down: IntProperty(
-        name="아래쪽 루프 (+/-)",
-        description="클릭한 루프에서 화면 아래쪽으로 루프를 몇 줄 더 선택할지",
+        name="폭: 아래쪽 루프 (+/-)",
+        description="클릭한 루프에서 화면 아래쪽으로 나란한 루프를 몇 줄 더 선택할지 (루프의 폭)",
         default=0, min=0, max=50, options={'SKIP_SAVE'},   # soft_max 를 따로 두지 않아야 +/- 화살표도 끝까지(50) 올라간다
+    )
+    length_adjust: IntProperty(
+        name="길이: 엣지 (-/+)",
+        description="루프를 따라가는 길이. 클릭한 엣지를 가운데로 엣지를 한 칸씩 줄이고(-) 다시 늘린다(+). 0 이면 루프 전체. "
+                    "폭을 늘렸다면 나란한 루프도 같은 길이로 잘린다. 줄이는 동안은 미러 반대편 확장을 쓰지 않는다",
+        default=0, min=-200, max=0, options={'SKIP_SAVE'},
     )
     # 패널에서 값을 바꾸면 Blender 가 실행 취소 후 execute 를 다시 부른다. 그래서 invoke 에서 정한 것을 기억해 둔다.
     seed_object: StringProperty(options={'HIDDEN', 'SKIP_SAVE'})
@@ -86,6 +92,7 @@ class MESH_OT_mirror_loop_select(bpy.types.Operator):
             col = layout.column(align=True)
             col.prop(self, "steps_up")
             col.prop(self, "steps_down")
+            col.prop(self, "length_adjust")
             layout.separator()
         layout.prop(self, "max_angle")
         layout.prop(self, "use_dihedral")
@@ -173,16 +180,30 @@ class MESH_OT_mirror_loop_select(bpy.types.Operator):
         # 씨앗에서 직접 끝까지 걸어 루프를 완성하고 미러 반대편까지 확장
         seed = bm.edges[self.seed_edge]
         loop = walk_loop(seed, cos_limit, dih)
+        full_idxs = {e.index for e in loop}
         # 1단계에서는 미러 반대편을 확장하지 않는다.
         axes = get_mirror_axes(ob) if use_mirror_extension(context) else []
+
+        # 길이 줄이기: 클릭한 엣지를 가운데로 엣지를 keep 개만 남긴다.
+        # 줄이는 동안에는 미러 반대편과 '기본 루프가 고른 엣지'(루프 전체)를 쓰지 않는다.
+        keep, ref_dir = 0, None
+        if self.do_select and self.length_adjust < 0:
+            keep = max(1, len(loop) + self.length_adjust)
+            if keep < len(loop):
+                window, _n, ref_dir = trimmed_loop(seed, cos_limit, dih, keep)
+                loop = window
+                axes = []
+            else:
+                keep = 0
         mirror = find_mirror_edges(bm, loop, axes, self.threshold, cos_limit, dih) if axes else []
         for e in loop:
             e.select_set(self.do_select)
         for e in mirror:
             e.select_set(self.do_select)
-        for i in (int(s) for s in self.default_edges.split(",") if s):
-            if i < len(bm.edges):
-                bm.edges[i].select_set(self.do_select)
+        if not keep:
+            for i in (int(s) for s in self.default_edges.split(",") if s):
+                if i < len(bm.edges):
+                    bm.edges[i].select_set(self.do_select)
         bm.select_flush_mode()
 
         # 선택한 경우에만 '사이 채우기' 앵커와 휠 확장용 상태를 저장한다.
@@ -192,7 +213,8 @@ class MESH_OT_mirror_loop_select(bpy.types.Operator):
                 st = new_wheel_state(
                     ob, bm, seed,
                     {e.index for e in loop} | {e.index for e in mirror},
-                    axes, self.threshold, cos_limit, dih)
+                    axes, self.threshold, cos_limit, dih, full_idxs)
+                st['keep'], st['ref_dir'] = keep, ref_dir
                 self._expand(context, ob, bm, seed, st)
                 state.set_wheel(st)
 

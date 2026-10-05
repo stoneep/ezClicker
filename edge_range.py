@@ -16,16 +16,20 @@ edge_range.py — [엣지] 옆 루프로 선택 범위를 넓히고 줄이는 �
 """
 
 from .common import mesh_counts
-from .edge_core import find_mirror_edges, walk_loop
+from .edge_core import find_mirror_edges, trimmed_loop, walk_loop
 from .face_core import opposite_edge
 
 
-def new_wheel_state(ob, bm, seed, loop_idxs, axes, threshold, cos_limit, dih):
+def new_wheel_state(ob, bm, seed, loop_idxs, axes, threshold, cos_limit, dih, full_idxs=None):
     """
     Alt+클릭으로 루프를 고른 직후의 휠 확장 상태를 만든다. (state.set_wheel 에 넘긴다)
 
     loop_idxs : 시작 루프(+미러 반대편)의 엣지 인덱스 집합. 오프셋 0.
     호출하는 쪽에서 bm 의 인덱스(ensure_tables)가 최신인 상태여야 한다.
+
+    full_idxs : 길이를 줄이기 전의 전체 루프 엣지 인덱스. (줄이지 않았으면 loop_idxs 와 같다)
+                '한 바퀴 돌아 이미 선택한 루프로 돌아왔는지' 판정에 쓴다.
+    상태에 keep(루프마다 남길 엣지 수)과 ref_dir 을 넣으면 build_offset 이 나란한 루프도 같은 길이로 자른다.
     """
     return {
         'ob': ob.name,
@@ -40,6 +44,9 @@ def new_wheel_state(ob, bm, seed, loop_idxs, axes, threshold, cos_limit, dih):
         'seeds': {0: seed.index},
         'faces': {},   # 오프셋 -> (뒤쪽 면 인덱스, 앞쪽 면 인덱스). 0번은 첫 휠에서 결정
         'loops': {0: loop_idxs},
+        'full': {0: set(full_idxs if full_idxs is not None else loop_idxs)},
+        'keep': 0,
+        'ref_dir': None,
     }
 
 
@@ -58,8 +65,8 @@ def build_offset(bm, st, k):
     new = opposite_edge(face, bm.edges[st['seeds'][base]])
     if new is None or new.hide:
         return False
-    # 한 바퀴 돌아 이미 선택한 루프로 돌아온 경우
-    if any(new.index in idxs for idxs in st['loops'].values()):
+    # 한 바퀴 돌아 이미 선택한 루프로 돌아온 경우 (길이를 줄였어도 전체 루프 기준으로 본다)
+    if any(new.index in idxs for idxs in st.get('full', st['loops']).values()):
         return False
 
     others = [f for f in new.link_faces if f is not face and not f.hide]
@@ -68,10 +75,19 @@ def build_offset(bm, st, k):
     st['seeds'][k] = new.index
 
     loop = walk_loop(new, st['cos_limit'], st['dih'])
-    idxs = {e.index for e in loop}
-    if st['axes']:
-        idxs.update(e.index for e in find_mirror_edges(
-            bm, loop, st['axes'], st['threshold'], st['cos_limit'], st['dih'], st.get('cache')))
+    full = {e.index for e in loop}
+    if st.get('keep'):
+        # 길이를 줄인 상태: 나란한 루프도 씨앗(맞은편 엣지)을 가운데로 같은 개수만 남긴다.
+        # (미러 반대편은 자른 구간과 대응시키기 어려워 쓰지 않는다)
+        window, _n, _d = trimmed_loop(new, st['cos_limit'], st['dih'], st['keep'], st.get('ref_dir'))
+        idxs = {e.index for e in window}
+    else:
+        idxs = set(full)
+        if st['axes']:
+            idxs.update(e.index for e in find_mirror_edges(
+                bm, loop, st['axes'], st['threshold'], st['cos_limit'], st['dih'], st.get('cache')))
+    if 'full' in st:
+        st['full'][k] = full
     st['loops'][k] = idxs
     return True
 
