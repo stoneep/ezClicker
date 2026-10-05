@@ -276,6 +276,30 @@ def cross_orientation_edges(selected, keep, want, project, cos_limit, dih=True):
     return out
 
 
+def deselect_cross_orientation(selected, keep, deselect_v, deselect_h, project, cos_limit, dih=True):
+    """
+    keep(방금 고른 루프들의 엣지)의 화면 방향을 판별해서, selected 중 반대 방향 엣지를 해제한다.
+      가로(H) 이고 deselect_v 이면 세로 엣지를, 세로(V) 이고 deselect_h 이면 가로 엣지를 해제한다.
+    방향이 뚜렷하지 않으면 아무것도 하지 않는다. 해제한 엣지 수를 반환한다.
+
+    호출하는 쪽에서 엣지 전용 선택 모드일 때만 불러야 한다. (그 모드의 select_set(False)는 다른 선택
+    엣지가 쓰는 버텍스를 건드리지 않아서 교차하는 루프가 서로를 깨뜨리지 않는다.)
+    """
+    if not (deselect_v or deselect_h):
+        return 0
+    ori = screen_orientation(keep, project)
+    if ori == 'H' and deselect_v:
+        want = 'V'
+    elif ori == 'V' and deselect_h:
+        want = 'H'
+    else:
+        return 0
+    victims = cross_orientation_edges(selected, keep, want, project, cos_limit, dih)
+    for e in victims:
+        e.select_set(False)
+    return len(victims)
+
+
 # ---------------------------------------------------------------------------
 # 미러 확장
 # ---------------------------------------------------------------------------
