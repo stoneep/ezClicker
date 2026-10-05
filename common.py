@@ -19,6 +19,12 @@ def get_mirror_axes(obj):
     return sorted(axes)
 
 
+def is_face_mode(context):
+    """선택 모드가 '면'(버텍스/엣지 없이 면만 켜짐)인지."""
+    m = context.tool_settings.mesh_select_mode
+    return bool(m[2]) and not m[0] and not m[1]
+
+
 def mesh_counts(bm):
     return (len(bm.verts), len(bm.edges), len(bm.faces))
 
@@ -61,6 +67,14 @@ def pick_seed(context, ob, bm, indices, mouse):
             if best_d is None or d < best_d:
                 best, best_d = e, d
     return best if best is not None else bm.edges[next(iter(indices))]
+
+
+def screen_point(context, ob, co):
+    """오브젝트 로컬 좌표 co 의 화면(리전) 좌표. 3D 뷰가 아니거나 화면 밖이면 None."""
+    region, rv3d = context.region, context.region_data
+    if region is None or rv3d is None:
+        return None
+    return view3d_utils.location_3d_to_region_2d(region, rv3d, ob.matrix_world @ co)
 
 
 def screen_mid(context, ob, e):

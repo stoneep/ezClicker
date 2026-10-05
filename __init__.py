@@ -1,10 +1,16 @@
 """
 Mirror Loop Select
 
+선택 모드별 동작 (Edit Mode)
+  엣지 모드 : Alt+클릭 = 루프 선택 / Ctrl+Alt+클릭 = 시작 루프 ~ 클릭한 루프 사이의 '루프만' 선택
+              (가로대 엣지, 사이의 면은 선택하지 않는다.) 휠 = 루프를 한 줄씩 추가/제거
+  면 모드   : Ctrl+Alt+클릭 = 시작 루프 ~ 클릭한 루프 사이의 '면 전부'(사이를 잇는 모든 정점 포함) 선택
+              휠 = 면 띠를 한 줄씩 추가/제거
+
 파일 구성 (의존 방향: ops -> range -> core -> common)
 
   __init__.py    bl_info, 등록/해제, 키맵 조립
-  state.py       모듈 간 공유 상태 (휠 확장 상태, 사이 선택 앵커)
+  state.py       모듈 간 공유 상태 (휠 확장 상태, 면 휠 확장 상태, 사이 선택 앵커)
   common.py      엣지/면 공통 유틸
   settings.py    확장 단계 설정 (PropertyGroup)
   ui.py          헤더 버튼, 우클릭 메뉴, 팝오버 패널, 단계 전환 오퍼레이터
@@ -14,7 +20,8 @@ Mirror Loop Select
   edge_ops.py    [엣지] Alt+클릭 루프 선택, Alt/Ctrl+휠 확장 오퍼레이터
 
   face_core.py   [면]   사각형 면 위상 헬퍼, 루프 사이의 면 모으기
-  face_ops.py    [면]   Ctrl+Alt+클릭 사이 선택(면 포함) 오퍼레이터
+  face_range.py  [사이] Ctrl+Alt+클릭 직후 휠 확장 (엣지 모드 = 루프만, 면 모드 = 면 띠)
+  face_ops.py    [사이] Ctrl+Alt+클릭 사이 선택 + 직후 Alt/Ctrl+휠 확장 오퍼레이터
 
 새 기능을 추가할 때
   1) edge_* 또는 face_* 쪽에 오퍼레이터를 만들고, 모듈 맨 아래에
@@ -27,10 +34,10 @@ Mirror Loop Select
 bl_info = {
     "name": "Mirror Loop Select",
     "author": "류우",
-    "version": (0, 10, 0),
+    "version": (0, 12, 0),
     "blender": (4, 0, 0),
-    "location": "3D Viewport > Edit Mode > Alt + 클릭 = 루프 선택 / Ctrl + Alt + 클릭 = 시작 루프와 클릭한 루프 사이 전부 선택(면 포함) / (루프 선택 후) Alt + 휠 = 위·아래 동시 확장, Ctrl + 휠 = 한 방향 확장 / 헤더 또는 우클릭 메뉴 = 확장 단계(끔·1단계·2단계) 전환",
-    "description": "극점/삼각형에서 멈추지 않고 루프를 끝까지 선택 + 미러 축에서 끊긴 반대편 루프까지 선택 + Alt+휠로 위/아래 루프 확장/축소 + 루프와 루프 사이 전부(사이의 면까지) 선택 + 확장 단계 전환",
+    "location": "3D Viewport > Edit Mode > Alt + 클릭 = 루프 선택 / [엣지 모드] Ctrl + Alt + 클릭 = 시작 루프와 클릭한 루프 사이의 루프만 선택 / [면 모드] Ctrl + Alt + 클릭 = 시작 루프와 클릭한 루프 사이의 면 전부 선택 / (선택 직후) Alt + 휠 = 위·아래(바깥·안쪽) 동시 확장, Ctrl + 휠 = 한 방향 확장 / 헤더 또는 우클릭 메뉴 = 확장 단계(끔·1단계·2단계) 전환",
+    "description": "극점/삼각형에서 멈추지 않고 루프를 끝까지 선택 + 미러 축에서 끊긴 반대편 루프까지 선택 + Alt+휠로 위/아래 루프 확장/축소 + 엣지 모드: 루프와 루프 사이의 루프만 선택 / 면 모드: 루프 사이의 면까지 전부 선택 + 확장 단계 전환",
     "category": "Mesh",
 }
 
@@ -39,13 +46,13 @@ bl_info = {
 if "bpy" in locals():
     import importlib
     from . import (state, common, settings, face_core, edge_core, edge_range,
-                   edge_ops, face_ops, ui)
+                   face_range, edge_ops, face_ops, ui)
     for _m in (state, common, settings, face_core, edge_core, edge_range,
-               edge_ops, face_ops, ui):
+               face_range, edge_ops, face_ops, ui):
         importlib.reload(_m)
 else:
     from . import (state, common, settings, face_core, edge_core, edge_range,  # noqa: F401
-                   edge_ops, face_ops, ui)
+                   face_range, edge_ops, face_ops, ui)
 
 import bpy
 from bpy.props import PointerProperty

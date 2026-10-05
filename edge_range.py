@@ -3,6 +3,7 @@ edge_range.py — [엣지] 옆 루프로 선택 범위를 넓히고 줄이는 �
 
   - 휠 확장/축소 (Alt+휠 = 위·아래 동시, Ctrl+휠 = 한 방향)
   - 시작 루프 ~ 끝 루프 사이 탐색 (face_ops 의 사이 선택이 쓴다)
+  - 루프 체인(chain_state / build_offset / fork_chain)  (face_range 의 면 휠 확장도 쓴다)
 
 모델: 클릭한 루프가 오프셋 0.
       선택 = 오프셋 lo ~ hi 사이의 모든 루프. (lo <= 0 <= hi)
@@ -169,22 +170,29 @@ def chain_state(bm, seed, axes, threshold, cos_limit, dih, cache):
     }
 
 
-def find_between(bm, seed_a, target, axes, threshold, cos_limit, dih, max_steps):
+def fork_chain(st):
+    """chain_state 를 얕게 복사한다. (반대 방향으로 따로 걸어가기 위한 사본)"""
+    return {**st, 'seeds': dict(st['seeds']), 'faces': dict(st['faces']),
+            'loops': dict(st['loops'])}
+
+
+def find_between_chains(bm, seed_a, target, axes, threshold, cos_limit, dih, max_steps):
     """
     seed_a 의 루프에서 target(엣지 인덱스 집합)과 만날 때까지 양쪽으로 한 칸씩 걸어간다.
-    반환: (A 에서 바깥으로 순서대로 늘어놓은 루프 엣지 인덱스 집합 리스트, 걸어간 칸 수)
-          또는 못 찾으면 (None, 0).
+
+    반환: 못 찾으면 None, 찾으면 dict
+      'loops'  : A 에서 바깥으로 순서대로 늘어놓은 루프 엣지 인덱스 집합 리스트
+      'steps'  : 걸어간 칸 수 (A 와 B 가 같은 루프면 0)
+      'sign'   : B 가 있는 쪽 (+1 / -1, steps 가 0 이면 0)
+      'chains' : {+1: 체인, -1: 체인}  build_offset 으로 더 이어 걸을 수 있는 상태.
+                 오프셋 k>0 은 chains[1], k<0 은 chains[-1] 의 loops[k] 이고 오프셋 0 이 A.
     """
     cache = {}
     base = chain_state(bm, seed_a, axes, threshold, cos_limit, dih, cache)
+    chains = {1: base, -1: fork_chain(base)}
     if base['loops'][0] & target:
-        return [set(base['loops'][0])], 0
+        return {'loops': [set(base['loops'][0])], 'steps': 0, 'sign': 0, 'chains': chains}
 
-    chains = {
-        1: base,
-        -1: {**base, 'seeds': dict(base['seeds']), 'faces': dict(base['faces']),
-             'loops': dict(base['loops'])},
-    }
     pos = {1: 0, -1: 0}
     alive = {1: True, -1: True}
 
@@ -201,7 +209,22 @@ def find_between(bm, seed_a, target, axes, threshold, cos_limit, dih, max_steps)
             pos[sign] = k
             moved = True
             if st['loops'][k] & target:
-                return [st['loops'][j] for j in range(0, k + sign, sign)], abs(k)
+                return {
+                    'loops': [st['loops'][j] for j in range(0, k + sign, sign)],
+                    'steps': abs(k), 'sign': sign, 'chains': chains,
+                }
         if not moved:
             break
-    return None, 0
+    return None
+
+
+def find_between(bm, seed_a, target, axes, threshold, cos_limit, dih, max_steps):
+    """
+    find_between_chains 의 간단 버전.
+    반환: (A 에서 바깥으로 순서대로 늘어놓은 루프 엣지 인덱스 집합 리스트, 걸어간 칸 수)
+          또는 못 찾으면 (None, 0).
+    """
+    res = find_between_chains(bm, seed_a, target, axes, threshold, cos_limit, dih, max_steps)
+    if res is None:
+        return None, 0
+    return res['loops'], res['steps']
