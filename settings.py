@@ -48,6 +48,16 @@ class MLS_Settings(bpy.types.PropertyGroup):
         default='MIRROR',
         update=_on_settings_update,
     )
+    deselect_vertical: BoolProperty(
+        name="가로 선택 시 세로 해제",
+        description="엣지 모드에서 Ctrl+Alt+클릭으로 가로(화면 기준) 루프를 고르면, 사이 면의 세로 테두리와 이미 선택돼 있던 세로 선을 해제한다. 사이 면은 함께 선택 해제된다",
+        default=False,
+    )
+    deselect_horizontal: BoolProperty(
+        name="세로 선택 시 가로 해제",
+        description="엣지 모드에서 Ctrl+Alt+클릭으로 세로(화면 기준) 루프를 고르면, 사이 면의 가로 테두리와 이미 선택돼 있던 가로 선을 해제한다. 사이 면은 함께 선택 해제된다",
+        default=False,
+    )
     use_wheel: BoolProperty(
         name="휠 확장 사용",
         description="루프 선택 직후 Alt+휠 / Ctrl+휠로 옆 루프까지 확장/축소한다",

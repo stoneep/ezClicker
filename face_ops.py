@@ -11,6 +11,9 @@ face_ops.py — [면] 오퍼레이터와 키맵.
      (수동으로 엣지 -> 버텍스 -> 면 모드로 바꿔서 얻던 결과를 한 번에 만든다.)
   -> 끝나면 B 가 새 앵커가 되어 C 를 Ctrl+Alt+클릭하면 B~C 가 이어서 선택된다.
 
+옵션(패널): 엣지 전용 모드에서 고른 루프가 가로(또는 세로)이면 반대 방향의 선택 엣지를 해제한다.
+            사이 면의 테두리가 여기에 해당하며, 해제하면 그 사이 면도 함께 선택 해제되어 루프만 남는다.
+
 Blender 기본의 Ring 선택 키와 같다. 이 키맵이 우선한다.
 (바꾸려면 Preferences > Keymap > Mesh 에서 Mirror Loop Between 을 수정)
 끔 단계에서는 poll 이 실패해 Blender 기본 Ctrl+Alt+클릭(링 선택)이 그대로 동작한다.
@@ -24,12 +27,12 @@ from bpy.props import BoolProperty, FloatProperty, IntProperty
 from mathutils import Vector
 
 from . import state
-from .common import (ensure_tables, get_mirror_axes, mesh_counts, pick_seed,
-                     restore_selection, snapshot_selection)
-from .edge_core import find_mirror_edges, walk_loop
+from .common import (ensure_tables, get_mirror_axes, make_projector, mesh_counts,
+                     pick_seed, restore_selection, snapshot_selection)
+from .edge_core import deselect_cross_orientation, find_mirror_edges, walk_loop
 from .edge_range import find_between
 from .face_core import strip_faces
-from .settings import extension_enabled, use_mirror_extension
+from .settings import extension_enabled, get_settings, use_mirror_extension
 
 
 class MESH_OT_mirror_loop_between(bpy.types.Operator):
@@ -146,11 +149,32 @@ class MESH_OT_mirror_loop_between(bpy.types.Operator):
         for f in faces:
             f.select_set(True)
         bm.select_flush_mode()
+
+        # 엣지 전용 모드에서는 면을 고르면 면의 테두리(루프와 직각인 선)까지 같이 선택된다.
+        # 옵션이 켜져 있으면 고른 루프와 반대 방향(화면 기준)인 선택 엣지를 해제한다.
+        # 사이 면은 테두리가 풀리므로 함께 선택 해제된다.
+        s = get_settings(context)
+        edge_only = tuple(context.tool_settings.mesh_select_mode) == (False, True, False)
+        if s is not None and edge_only and (s.deselect_vertical or s.deselect_horizontal):
+            n = deselect_cross_orientation(
+                [e for e in bm.edges if e.select],
+                {bm.edges[i] for i in selected},
+                s.deselect_vertical, s.deselect_horizontal,
+                make_projector(context, ob), cos_limit, dih)
+            if n:
+                bm.select_flush_mode()
         bmesh.update_edit_mesh(ob.data, loop_triangles=False, destructive=False)
 
         # 끝 루프를 새 앵커로 -> 이어서 Ctrl+Alt+클릭하면 B~C 구간이 선택된다.
         state.set_anchor(ob.name, seed_b.index, counts)
         return {'FINISHED'}
+
+
+def draw_settings(layout, settings):
+    """패널/메뉴에 끼워 넣는 사이 선택 설정. (ui.draw_panel_body 가 호출한다)"""
+    col = layout.column(align=True)
+    col.prop(settings, "deselect_vertical")
+    col.prop(settings, "deselect_horizontal")
 
 
 # (idname, 키, 값, 수식키, 오퍼레이터 속성)
