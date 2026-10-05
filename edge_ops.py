@@ -24,7 +24,7 @@ from . import state
 from .common import (ensure_tables, face_only_mode, get_mirror_axes, mesh_counts, pick_seed,
                      restore_selection, snapshot_selection)
 from .edge_core import find_mirror_edges, trimmed_loop, walk_loop
-from .edge_range import (apply_range, build_offset, new_wheel_state, state_valid,
+from .edge_range import (apply_range, build_offset, new_wheel_state, ring_edges, state_valid,
                          step_both_sides, step_one_side)
 from .face_core import init_faces
 from .settings import extension_enabled, get_settings, use_mirror_extension
@@ -56,6 +56,12 @@ class MESH_OT_mirror_loop_select(bpy.types.Operator):
         default=True,
     )
     # 선택 직후 왼쪽 아래에 뜨는 '마지막 작업 조정' 패널에서 +/- 로 조절한다. (휠 확장과 같은 동작)
+    use_ring: BoolProperty(
+        name="링 (Ring)",
+        description="루프 대신 링을 선택한다: 클릭한 엣지와 나란히 쌓인 엣지 한 줄(사각형 면을 가로질러 맞은편 엣지를 계속 따라감). "
+                    "Blender 기본 링 선택과 같다. 폭/길이 값은 쓰지 않는다",
+        default=False, options={'SKIP_SAVE'},
+    )
     steps_up: IntProperty(
         name="폭: 위쪽 루프 (+/-)",
         description="클릭한 루프에서 화면 위쪽으로 나란한 루프를 몇 줄 더 선택할지 (루프의 폭)",
@@ -89,7 +95,9 @@ class MESH_OT_mirror_loop_select(bpy.types.Operator):
     def draw(self, context):
         layout = self.layout
         if self.do_select:
+            layout.prop(self, "use_ring")
             col = layout.column(align=True)
+            col.enabled = not self.use_ring         # 링은 폭/길이를 쓰지 않는다
             col.prop(self, "steps_up")
             col.prop(self, "steps_down")
             col.prop(self, "length_adjust")
@@ -177,8 +185,18 @@ class MESH_OT_mirror_loop_select(bpy.types.Operator):
         if dih:
             bm.normal_update()   # 다이헤드럴 계산에 쓰는 면 법선을 최신으로
 
-        # 씨앗에서 직접 끝까지 걸어 루프를 완성하고 미러 반대편까지 확장
         seed = bm.edges[self.seed_edge]
+
+        # 링: 루프가 아니라 클릭한 엣지와 나란히 쌓인 엣지 한 줄. 폭/길이/미러/기본 루프 결과는 쓰지 않는다.
+        if self.do_select and self.use_ring:
+            for e in ring_edges(seed):
+                e.select_set(True)
+            bm.select_flush_mode()
+            state.set_anchor(ob.name, seed.index, mesh_counts(bm))
+            bmesh.update_edit_mesh(ob.data, loop_triangles=False, destructive=False)
+            return {'FINISHED'}
+
+        # 씨앗에서 직접 끝까지 걸어 루프를 완성하고 미러 반대편까지 확장
         loop = walk_loop(seed, cos_limit, dih)
         full_idxs = {e.index for e in loop}
         # 1단계에서는 미러 반대편을 확장하지 않는다.

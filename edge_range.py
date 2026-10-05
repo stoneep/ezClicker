@@ -92,6 +92,26 @@ def build_offset(bm, st, k):
     return True
 
 
+def ring_edges(seed):
+    """
+    seed 의 링(ring): 사각형 면을 가로질러 맞은편 엣지를 양쪽으로 계속 따라간 엣지 집합.
+    루프가 '진행 방향'으로 이어지는 엣지라면, 링은 그와 직각으로 나란히 쌓인 엣지 한 줄이다.
+    삼각형/N-gon, 경계, 숨긴 엣지를 만나면 그쪽에서 멈추고, 한 바퀴 돌아오면 거기서 끝난다.
+    (폭 최대 + 길이 1 과 같은 결과를 한 줄씩 루프를 걷지 않고 얻는다. 제한이 없고 빠르다.)
+    """
+    seen = {seed}
+    for start in [f for f in seed.link_faces if not f.hide][:2]:
+        e, f = seed, start
+        while f is not None:
+            new = opposite_edge(f, e)
+            if new is None or new.hide or new in seen:
+                break
+            seen.add(new)
+            nxt = [g for g in new.link_faces if g is not f and not g.hide]
+            e, f = new, (nxt[0] if nxt else None)
+    return seen
+
+
 def desired_for(st, lo, hi):
     desired = set()
     for k in range(lo, hi + 1):
