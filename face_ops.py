@@ -16,6 +16,10 @@ face_ops.py — [면] 오퍼레이터와 키맵.
      (수동으로 엣지 -> 버텍스 -> 면 모드로 바꿔서 얻던 결과를 한 번에 만든다.)
   -> 끝나면 B 가 새 앵커가 되어 C 를 Ctrl+Alt+클릭하면 B~C 가 이어서 선택된다.
 
+  Alt+더블클릭  : 클릭한 면과 같은 모양의 면(평면 영역)을 전부 선택
+                  -> MESH_OT_mirror_face_similar  (Shift+G > 모양 메뉴에서는 선택한 면을 기준으로 실행)
+  기어, 나사 머리처럼 같은 평면 모양을 많이 만들 때 쓴다. 비교 방법은 face_shape.py 참고.
+
 Blender 기본의 Ring 선택 키와 같다. 이 키맵이 우선한다.
 (바꾸려면 Preferences > Keymap > Mesh 에서 Mirror Loop Between 을 수정)
 끔 단계에서는 poll 이 실패해 Blender 기본 Ctrl+Alt+클릭(링 선택)이 그대로 동작한다.
@@ -25,8 +29,10 @@ import math
 
 import bpy
 import bmesh
-from bpy.props import BoolProperty, FloatProperty, IntProperty
+from bpy.props import BoolProperty, FloatProperty, IntProperty, StringProperty
+from bpy_extras import view3d_utils
 from mathutils import Vector
+from mathutils.bvhtree import BVHTree
 
 from . import state
 from .common import (ensure_tables, get_mirror_axes, mesh_counts, pick_seed,
@@ -34,6 +40,8 @@ from .common import (ensure_tables, get_mirror_axes, mesh_counts, pick_seed,
 from .edge_core import find_mirror_edges, walk_loop
 from .edge_range import find_between
 from .face_core import strip_faces
+from .face_shape import (DEFAULT_ANGLE_TOL, DEFAULT_FLAT, DEFAULT_LEN_TOL, flat_island,
+                         island_shape, similar_islands)
 from .settings import extension_enabled, use_mirror_extension
 
 
@@ -158,6 +166,136 @@ class MESH_OT_mirror_loop_between(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class MESH_OT_mirror_face_similar(bpy.types.Operator):
+    """클릭한(또는 선택한) 면과 같은 모양의 평평한 면 영역을 전부 선택 (회전·거울·이동 무관)"""
+    bl_idname = "mesh.mirror_face_similar"
+    bl_label = "Select Similar Shape"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    extend: BoolProperty(
+        name="Extend",
+        description="기존 선택을 지우지 않고 찾은 면을 추가한다",
+        default=False,
+    )
+    scale_invariant: BoolProperty(
+        name="Ignore Size",
+        description="크기가 달라도 모양이 같으면(닮음) 찾는다",
+        default=False,
+    )
+    use_island: BoolProperty(
+        name="Flat Regions",
+        description="이웃한 평평한 면들을 한 덩어리의 모양으로 비교한다. 끄면 면 하나씩 비교한다",
+        default=True,
+    )
+    length_tolerance: FloatProperty(
+        name="Length Tolerance",
+        description="변 길이가 이 비율 이내로 다르면 같다고 본다 (0.01 = 1%)",
+        default=DEFAULT_LEN_TOL, min=0.0, max=0.5, precision=3,
+    )
+    angle_tolerance: FloatProperty(
+        name="Angle Tolerance",
+        description="꺾임 각이 이 이내로 다르면 같다고 본다",
+        default=DEFAULT_ANGLE_TOL, min=0.0, max=math.radians(30.0), subtype='ANGLE',
+    )
+    flat_angle: FloatProperty(
+        name="Flat Angle",
+        description="이웃한 면의 법선 차이가 이 이내면 같은 평면으로 묶는다",
+        default=DEFAULT_FLAT, min=0.0, max=math.radians(30.0), subtype='ANGLE',
+    )
+    pick: BoolProperty(options={'HIDDEN', 'SKIP_SAVE'}, default=False)
+    seed_object: StringProperty(options={'HIDDEN'})     # 마우스로 고른 면 (다시 실행/리두에서 쓴다)
+    seed_face: IntProperty(default=-1, options={'HIDDEN'})
+
+    @classmethod
+    def poll(cls, context):
+        return context.mode == 'EDIT_MESH' and extension_enabled(context)
+
+    def _pick_face(self, context, event, objs):
+        """마우스 아래 가장 가까운 면. (오브젝트 이름, 면 인덱스) 또는 None."""
+        region, rv3d = context.region, context.region_data
+        if region is None or rv3d is None:
+            return None
+        coord = (event.mouse_region_x, event.mouse_region_y)
+        origin = view3d_utils.region_2d_to_origin_3d(region, rv3d, coord)
+        vec = view3d_utils.region_2d_to_vector_3d(region, rv3d, coord)
+        best = None
+        for ob in objs:
+            bm = bmesh.from_edit_mesh(ob.data)
+            bm.faces.ensure_lookup_table()
+            inv = ob.matrix_world.inverted()
+            o = inv @ origin
+            d = (inv.to_3x3() @ vec).normalized()
+            hit = BVHTree.FromBMesh(bm).ray_cast(o, d)
+            if hit[0] is None or bm.faces[hit[2]].hide:
+                continue
+            dist = (ob.matrix_world @ hit[0] - origin).length
+            if best is None or dist < best[0]:
+                best = (dist, ob.name, hit[2])
+        return None if best is None else (best[1], best[2])
+
+    def invoke(self, context, event):
+        if self.pick:
+            hit = self._pick_face(context, event, list(context.objects_in_mode_unique_data))
+            if hit is None:
+                return {'PASS_THROUGH'}      # 면이 없는 곳이면 Blender 기본 동작에 넘긴다
+            self.seed_object, self.seed_face = hit
+        return self.execute(context)
+
+    def execute(self, context):
+        objs = list(context.objects_in_mode_unique_data)
+
+        # 1) 기준이 되는 면: 마우스로 고른 면, 없으면 선택한 면
+        #    (bm 래퍼를 들고 있어야 한다. 변수를 덮어써서 래퍼가 해제되면 이미 모은 면 참조도 무효가 된다.)
+        bms = [bmesh.from_edit_mesh(ob.data) for ob in objs]
+        seed_faces = []
+        for ob, bm in zip(objs, bms):
+            bm.faces.ensure_lookup_table()
+            if self.seed_face >= 0:
+                if ob.name == self.seed_object and self.seed_face < len(bm.faces):
+                    seed_faces.append(bm.faces[self.seed_face])
+            else:
+                seed_faces.extend(f for f in bm.faces if f.select and not f.hide)
+        if not seed_faces:
+            self.report({'WARNING'}, "기준이 될 면을 선택하거나 Alt+더블클릭으로 면을 가리키세요")
+            return {'CANCELLED'}
+
+        # 2) 기준 면의 모양 (같은 영역에 속한 면은 한 번만)
+        shapes, seen = [], set()
+        for f in seed_faces:
+            if f in seen:
+                continue
+            isl = flat_island(f, self.flat_angle) if self.use_island else {f}
+            seen |= isl
+            shp = island_shape(isl, self.scale_invariant)
+            if shp is not None:
+                shapes.append(shp)
+        if not shapes:
+            self.report({'WARNING'}, "이 면의 외곽선을 읽을 수 없습니다 (점으로만 맞닿는 면이거나 길이가 0인 변)")
+            return {'CANCELLED'}
+
+        # 3) 모든 편집 중인 오브젝트에서 같은 모양 찾기
+        del seed_faces, seen
+        if not self.extend:
+            bpy.ops.mesh.select_all(action='DESELECT')
+        regions = faces_total = 0
+        for ob in objs:
+            bm = bmesh.from_edit_mesh(ob.data)
+            bm.faces.ensure_lookup_table()
+            bm.normal_update()
+            found = similar_islands(bm, shapes, self.flat_angle, self.length_tolerance,
+                                    self.angle_tolerance, self.scale_invariant, self.use_island)
+            for isl in found:
+                for f in isl:
+                    f.select_set(True)
+                regions += 1
+                faces_total += len(isl)
+            bm.select_flush_mode()
+            bmesh.update_edit_mesh(ob.data, loop_triangles=False, destructive=False)
+
+        self.report({'INFO'}, "같은 모양 %d곳 (면 %d개) 선택" % (regions, faces_total))
+        return {'FINISHED'}
+
+
 # (idname, 키, 값, 수식키, 오퍼레이터 속성, 환경설정에 보일 제목, 한 줄 설명)
 KEYMAPS = (
     (MESH_OT_mirror_loop_between.bl_idname, 'LEFTMOUSE', 'PRESS', {'ctrl': True, 'alt': True},
@@ -168,8 +306,13 @@ KEYMAPS = (
      {'select_faces': False},
      "사이 루프만 선택",
      "시작 루프~클릭한 루프 사이의 루프(엣지)만, 면은 제외"),
+    (MESH_OT_mirror_face_similar.bl_idname, 'LEFTMOUSE', 'DOUBLE_CLICK', {'alt': True},
+     {'pick': True},
+     "같은 모양 면 선택",
+     "클릭한 면과 같은 모양(회전·거울 무관)의 평면을 전부 선택"),
 )
 
 classes = (
     MESH_OT_mirror_loop_between,
+    MESH_OT_mirror_face_similar,
 )

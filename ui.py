@@ -102,12 +102,19 @@ def draw_context_menu(self, context):
                 text=LEVEL_SHORT[s.level], icon=LEVEL_ICON[s.level])
 
 
+def draw_select_similar(self, context):
+    """Shift+G (Select Similar) 메뉴에 '모양' 항목을 붙인다. 선택한 면과 같은 모양의 면을 찾는다."""
+    self.layout.operator("mesh.mirror_face_similar", text="모양 (Shape)")
+
+
 def register_hooks():
     bpy.types.VIEW3D_HT_header.append(draw_header_button)
     bpy.types.VIEW3D_MT_edit_mesh_context_menu.append(draw_context_menu)
+    bpy.types.VIEW3D_MT_edit_mesh_select_similar.append(draw_select_similar)
 
 
 def unregister_hooks():
+    bpy.types.VIEW3D_MT_edit_mesh_select_similar.remove(draw_select_similar)
     bpy.types.VIEW3D_MT_edit_mesh_context_menu.remove(draw_context_menu)
     bpy.types.VIEW3D_HT_header.remove(draw_header_button)
 
