@@ -17,8 +17,9 @@ from bpy.props import BoolProperty, FloatProperty, IntProperty
 from mathutils import Vector
 
 from . import state
-from .common import ensure_tables, get_mirror_axes, mesh_counts, pick_seed
-from .edge_core import find_mirror_edges, walk_loop
+from .common import ensure_tables, get_mirror_axes, make_projector, mesh_counts, pick_seed
+from .edge_core import (cross_orientation_edges, find_mirror_edges,
+                        screen_orientation, walk_loop)
 from .edge_range import (apply_range, new_wheel_state, state_valid,
                          step_both_sides, step_one_side)
 from .face_core import init_faces
@@ -88,6 +89,11 @@ class MESH_OT_mirror_loop_select(bpy.types.Operator):
         # (이미 선택돼 있던 엣지를 다시 클릭해도 '해제'로 오인하지 않도록)
         plain = not (self.extend or self.toggle or self.deselect)
 
+        # 반대 방향 해제 옵션은 엣지 전용 모드에서만 쓴다.
+        edge_only = tuple(context.tool_settings.mesh_select_mode) == (False, True, False)
+        deselect_v = settings is not None and settings.deselect_vertical
+        deselect_h = settings is not None and settings.deselect_horizontal
+
         # 3) 씨앗에서 직접 끝까지 걸어 루프를 완성하고 미러 반대편까지 확장
         for ob in objs:
             bm = bmesh.from_edit_mesh(ob.data)
@@ -120,6 +126,20 @@ class MESH_OT_mirror_loop_select(bpy.types.Operator):
             mirror = find_mirror_edges(bm, loop, axes, self.threshold, cos_limit, dih) if axes else []
             for e in mirror:
                 e.select_set(select)
+
+            # 엣지 전용 모드에서 가로/세로 루프를 고르면 반대 방향 루프는 해제한다. (옵션)
+            #   엣지 전용 모드에서만 한다: 이 모드의 select_set(False)는 다른 선택 엣지가 쓰는
+            #   버텍스를 건드리지 않아서, 교차하는 루프가 서로를 깨뜨리지 않는다.
+            if select and edge_only and (deselect_v or deselect_h):
+                prev = [bm.edges[i] for i in before[ob]] if not plain else []
+                if prev:
+                    project = make_projector(context, ob)
+                    ori = screen_orientation(loop, project)
+                    if (ori == 'H' and deselect_v) or (ori == 'V' and deselect_h):
+                        keep = loop | set(mirror)
+                        for e in cross_orientation_edges(prev, keep, 'V' if ori == 'H' else 'H',
+                                                         project, cos_limit, dih):
+                            e.select_set(False)
 
             bm.select_flush_mode()
 
@@ -196,6 +216,9 @@ class MESH_OT_mirror_loop_step(bpy.types.Operator):
 def draw_settings(layout, settings):
     """패널/메뉴에 끼워 넣는 엣지 기능 설정. (ui.draw_panel_body 가 호출한다)"""
     layout.prop(settings, "use_wheel")
+    col = layout.column(align=True)
+    col.prop(settings, "deselect_vertical")
+    col.prop(settings, "deselect_horizontal")
 
 
 # (idname, 키, 값, 수식키, 오퍼레이터 속성)

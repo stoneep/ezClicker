@@ -6,7 +6,8 @@ bmesh 만 다루고 오퍼레이터/UI 는 모른다.
   1) 다이헤드럴(면 사이 각도) 보조 점수
   2) 루프 워커: 극점(3/5극), 삼각형, N-gon 에서도 멈추지 않고 이어서 진행
      - 크리스 인식: 불리언 유니온 등으로 생긴 교차선에서 엣지가 다른 표면으로 새지 않게 보정
-  3) 미러 확장: 미러 축에서 끊긴 반대편 루프 찾기
+  3) 화면 방향 판별: 가로/세로 루프 구분, 반대 방향 루프 고르기
+  4) 미러 확장: 미러 축에서 끊긴 반대편 루프 찾기
 """
 
 import math
@@ -223,6 +224,56 @@ def walk_loop(seed, cos_limit, dih=True):
             v = ne.other_vert(v)
             e = ne
     return loop
+
+
+# ---------------------------------------------------------------------------
+# 화면 방향(가로/세로) 판별 + 반대 방향 루프 고르기
+#
+# 화면에 투영한 엣지의 |dx| 합과 |dy| 합을 비교한다. 직선 루프는 물론, 옆에서 본 원형 링도
+# 타원이므로 가로로 나온다. 위에서 내려다본 원처럼 어느 쪽도 뚜렷하지 않으면 판정하지 않는다(None).
+# 투영 함수(project)는 호출하는 쪽이 넘긴다. (이 모듈은 화면/오퍼레이터를 모른다.)
+# ---------------------------------------------------------------------------
+
+ORIENT_RATIO = 1.2     # 한 방향이 다른 방향보다 이만큼 이상 커야 가로/세로로 본다
+
+
+def screen_orientation(edges, project):
+    """
+    엣지 묶음의 화면 방향: 'H'(가로) / 'V'(세로) / None(애매하거나 투영 불가).
+    project(co) -> 2D 점(.x, .y) 또는 None.
+    """
+    dx = dy = 0.0
+    for e in edges:
+        a, b = project(e.verts[0].co), project(e.verts[1].co)
+        if a is None or b is None:
+            continue
+        dx += abs(a.x - b.x)
+        dy += abs(a.y - b.y)
+    if dx > dy * ORIENT_RATIO:
+        return 'H'
+    if dy > dx * ORIENT_RATIO:
+        return 'V'
+    return None
+
+
+def cross_orientation_edges(selected, keep, want, project, cos_limit, dih=True):
+    """
+    selected(선택돼 있던 엣지들) 중 keep 에 없는 것을 루프 단위로 묶어,
+    화면 방향이 want('H'/'V')인 루프의 엣지만 모아 반환한다.
+
+    루프 단위로 묶는 이유: 옆에서 본 링은 양 끝 엣지가 화면에서 세로로 서 있어도 전체로는 가로이기 때문이다.
+    선택이 루프 일부뿐이면 그 일부만으로 방향을 판정한다.
+    """
+    remaining = set(selected) - set(keep)
+    out = []
+    while remaining:
+        seed = next(iter(remaining))
+        group = walk_loop(seed, cos_limit, dih) & remaining
+        group.add(seed)
+        if screen_orientation(group, project) == want:
+            out.extend(group)
+        remaining -= group
+    return out
 
 
 # ---------------------------------------------------------------------------
