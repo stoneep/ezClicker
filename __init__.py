@@ -15,7 +15,7 @@ Mirror Loop Select
   edge_ops.py    [엣지] Alt+클릭 루프 선택, Alt/Ctrl+휠 확장 오퍼레이터
 
   face_core.py   [면]   사각형 면 위상 헬퍼, 루프 사이의 면 모으기
-  face_ops.py    [면]   Ctrl+Alt+클릭 사이 선택(면 포함) 오퍼레이터
+  face_ops.py    [면]   Ctrl+Alt+클릭 사이 전부 선택 / Shift+Alt+클릭 사이 루프만 선택 오퍼레이터
 
 새 기능을 추가할 때
   1) edge_* 또는 face_* 쪽에 오퍼레이터를 만들고, 모듈 맨 아래에
@@ -31,7 +31,7 @@ bl_info = {
     "author": "류우",
     "version": (0, 10, 0),
     "blender": (4, 0, 0),
-    "location": "3D Viewport > Edit Mode > Alt + 클릭 = 루프 선택 / Ctrl + Alt + 클릭 = 시작 루프와 클릭한 루프 사이 전부 선택(면 포함) / (루프 선택 후) Alt + 휠 = 위·아래 동시 확장, Ctrl + 휠 = 한 방향 확장 / 헤더 또는 우클릭 메뉴 = 확장 단계(끔·1단계·2단계) 전환",
+    "location": "3D Viewport > Edit Mode > Alt + 클릭 = 루프 선택 / Ctrl + Alt + 클릭 = 시작 루프와 클릭한 루프 사이 전부 선택(버텍스·엣지·면) / Shift + Alt + 클릭 = 사이의 루프만 선택 / Ctrl + Shift + Alt + 클릭 = 루프 선택 추가·해제 / (루프 선택 후) Alt + 휠 = 위·아래 동시 확장, Ctrl + 휠 = 한 방향 확장 / 헤더 또는 우클릭 메뉴 = 확장 단계(끔·1단계·2단계) 전환",
     "description": "극점/삼각형에서 멈추지 않고 루프를 끝까지 선택 + 미러 축에서 끊긴 반대편 루프까지 선택 + Alt+휠로 위/아래 루프 확장/축소 + 루프와 루프 사이 전부(사이의 면까지) 선택 + 확장 단계 전환",
     "category": "Mesh",
 }

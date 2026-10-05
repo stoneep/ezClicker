@@ -1,8 +1,13 @@
 """
 face_ops.py — [면] 오퍼레이터와 키맵.
 
-  Ctrl+Alt+클릭 : 마지막으로 고른 루프 ~ 클릭한 루프 사이 전부 선택 (사이의 면 포함)
-                  -> MESH_OT_mirror_loop_between
+  Ctrl+Alt+클릭  : 마지막으로 고른 루프 ~ 클릭한 루프 사이 '전부' 선택
+                   (사이의 모든 버텍스·엣지·면. select_faces=True)
+  Shift+Alt+클릭 : 같은 구간에서 '루프(엣지)만' 선택 (사이의 면·루프와 직각인 테두리는 제외. select_faces=False)
+                   -> 둘 다 MESH_OT_mirror_loop_between (키맵의 select_faces 값만 다르다)
+
+  버텍스 모드에서는 어느 쪽이든 루프의 버텍스를 고르면 Blender 가 그 사이 엣지·면을 자동으로 같이 선택하므로
+  결과가 같다. 차이는 엣지 모드에서 가장 분명하다.
 
   1) Alt+클릭으로 시작 루프 A 를 고른다. (이게 앵커가 된다)
   2) Ctrl+Alt+클릭으로 끝 루프 B 를 누른다.
@@ -33,7 +38,7 @@ from .settings import extension_enabled, use_mirror_extension
 
 
 class MESH_OT_mirror_loop_between(bpy.types.Operator):
-    """Alt+클릭으로 고른 시작 루프와 이 키로 클릭한 끝 루프 사이의 루프(와 면)를 전부 선택"""
+    """Alt+클릭으로 고른 시작 루프와 이 키로 클릭한 끝 루프 사이를 전부(또는 루프만) 선택"""
     bl_idname = "mesh.mirror_loop_between"
     bl_label = "Mirror Loop Between"
     bl_options = {'REGISTER', 'UNDO'}
@@ -148,16 +153,21 @@ class MESH_OT_mirror_loop_between(bpy.types.Operator):
         bm.select_flush_mode()
         bmesh.update_edit_mesh(ob.data, loop_triangles=False, destructive=False)
 
-        # 끝 루프를 새 앵커로 -> 이어서 Ctrl+Alt+클릭하면 B~C 구간이 선택된다.
+        # 끝 루프를 새 앵커로 -> 이어서 Ctrl+Alt+클릭(또는 Shift+Alt+클릭)하면 B~C 구간이 선택된다.
         state.set_anchor(ob.name, seed_b.index, counts)
         return {'FINISHED'}
 
 
 # (idname, 키, 값, 수식키, 오퍼레이터 속성, 환경설정에 보일 제목, 한 줄 설명)
 KEYMAPS = (
-    (MESH_OT_mirror_loop_between.bl_idname, 'LEFTMOUSE', 'PRESS', {'ctrl': True, 'alt': True}, {},
-     "사이 선택",
-     "시작 루프~클릭한 루프 사이 전부, 면 포함"),
+    (MESH_OT_mirror_loop_between.bl_idname, 'LEFTMOUSE', 'PRESS', {'ctrl': True, 'alt': True},
+     {'select_faces': True},
+     "사이 전부 선택",
+     "시작 루프~클릭한 루프 사이의 모든 버텍스·엣지·면"),
+    (MESH_OT_mirror_loop_between.bl_idname, 'LEFTMOUSE', 'PRESS', {'shift': True, 'alt': True},
+     {'select_faces': False},
+     "사이 루프만 선택",
+     "시작 루프~클릭한 루프 사이의 루프(엣지)만, 면은 제외"),
 )
 
 classes = (
