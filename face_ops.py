@@ -153,9 +153,11 @@ class MESH_OT_mirror_loop_between(bpy.types.Operator):
         return {'FINISHED'}
 
 
-# (idname, 키, 값, 수식키, 오퍼레이터 속성)
+# (idname, 키, 값, 수식키, 오퍼레이터 속성, 환경설정에 보일 제목, 한 줄 설명)
 KEYMAPS = (
-    (MESH_OT_mirror_loop_between.bl_idname, 'LEFTMOUSE', 'PRESS', {'ctrl': True, 'alt': True}, {}),
+    (MESH_OT_mirror_loop_between.bl_idname, 'LEFTMOUSE', 'PRESS', {'ctrl': True, 'alt': True}, {},
+     "사이 선택",
+     "마지막으로 고른 시작 루프와 클릭한 루프 사이를 전부 선택 (사이의 면 포함)"),
 )
 
 classes = (

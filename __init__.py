@@ -8,6 +8,7 @@ Mirror Loop Select
   common.py      엣지/면 공통 유틸
   settings.py    확장 단계 설정 (PropertyGroup)
   ui.py          헤더 버튼, 우클릭 메뉴, 팝오버 패널, 단계 전환 오퍼레이터
+  prefs.py       애드온 환경설정: 단축키 목록 (on/off, 키 변경, 한 줄 설명)
 
   edge_core.py   [엣지] 루프 걷기, 다이헤드럴 보조 점수, 미러 반대편 루프 찾기
   edge_range.py  [엣지] 휠 확장/축소(오프셋 루프), 시작~끝 루프 사이 탐색
@@ -19,7 +20,8 @@ Mirror Loop Select
 새 기능을 추가할 때
   1) edge_* 또는 face_* 쪽에 오퍼레이터를 만들고, 모듈 맨 아래에
      classes (필수), KEYMAPS (키를 줄 때), draw_settings (패널에 옵션이 필요할 때) 를 내놓는다.
-     - KEYMAPS 항목: (idname, 키, 값, {수식키}, {오퍼레이터 속성})
+     - KEYMAPS 항목: (idname, 키, 값, {수식키}, {오퍼레이터 속성}, 환경설정에 보일 제목, 한 줄 설명)
+       (같은 idname 이면 오퍼레이터 속성 조합이 서로 달라야 환경설정이 항목을 구분할 수 있다)
      - draw_settings(layout, settings): 패널/메뉴에 옵션을 그린다. 옵션 값은 settings.MLS_Settings 에 둔다.
   2) 아래 MODULES 에 그 모듈을 넣는다. (등록·키맵·패널 연결은 자동)
 """
@@ -39,20 +41,20 @@ bl_info = {
 if "bpy" in locals():
     import importlib
     from . import (state, common, settings, face_core, edge_core, edge_range,
-                   edge_ops, face_ops, ui)
+                   edge_ops, face_ops, ui, prefs)
     for _m in (state, common, settings, face_core, edge_core, edge_range,
-               edge_ops, face_ops, ui):
+               edge_ops, face_ops, ui, prefs):
         importlib.reload(_m)
 else:
     from . import (state, common, settings, face_core, edge_core, edge_range,  # noqa: F401
-                   edge_ops, face_ops, ui)
+                   edge_ops, face_ops, ui, prefs)
 
 import bpy
 from bpy.props import PointerProperty
 
 
 # 클래스 / 키맵 / 패널 설정을 내놓는 모듈. 등록은 이 순서대로 한다.
-MODULES = (settings, edge_ops, face_ops, ui)
+MODULES = (settings, edge_ops, face_ops, ui, prefs)
 
 classes = tuple(c for m in MODULES for c in m.classes)
 addon_keymaps = []
@@ -72,15 +74,20 @@ def register():
     if kc:
         km = kc.keymaps.new(name='Mesh', space_type='EMPTY')
         for m in MODULES:
-            for idname, key, value, modifiers, props in getattr(m, "KEYMAPS", ()):
+            for idname, key, value, modifiers, props, title, desc in getattr(m, "KEYMAPS", ()):
                 kmi = km.keymap_items.new(idname, key, value, **modifiers)
                 for name, val in props.items():
                     setattr(kmi.properties, name, val)
                 addon_keymaps.append((km, kmi))
+                state.keymap_items.append({
+                    'idname': idname, 'kmi': kmi, 'km_name': km.name,
+                    'title': title, 'desc': desc,
+                })
 
 
 def unregister():
     state.reset_all()
+    state.keymap_items.clear()
 
     ui.unregister_hooks()
     ui.settings_drawers.clear()

@@ -198,21 +198,33 @@ def draw_settings(layout, settings):
     layout.prop(settings, "use_wheel")
 
 
-# (idname, 키, 값, 수식키, 오퍼레이터 속성)
+# (idname, 키, 값, 수식키, 오퍼레이터 속성, 환경설정에 보일 제목, 한 줄 설명)
 KEYMAPS = (
-    (MESH_OT_mirror_loop_select.bl_idname, 'LEFTMOUSE', 'PRESS', {'alt': True}, {}),
+    (MESH_OT_mirror_loop_select.bl_idname, 'LEFTMOUSE', 'PRESS', {'alt': True}, {},
+     "루프 선택",
+     "극점·삼각형에서 멈추지 않고 루프를 끝까지 선택 (2단계에서는 미러 반대편까지)"),
     (MESH_OT_mirror_loop_select.bl_idname, 'LEFTMOUSE', 'PRESS',
-     {'shift': True, 'alt': True}, {'toggle': True}),
+     {'shift': True, 'alt': True}, {'toggle': True},
+     "루프 선택 (추가/해제)",
+     "이미 선택한 루프는 해제하고, 아니면 선택에 추가"),
 
     # Alt+휠: 위·아래 동시 / Ctrl+휠: 한 방향
     (MESH_OT_mirror_loop_step.bl_idname, 'WHEELUPMOUSE', 'PRESS',
-     {'alt': True}, {'direction': 1, 'both_sides': True}),
+     {'alt': True}, {'direction': 1, 'both_sides': True},
+     "위·아래 동시 확장 (휠 업)",
+     "루프 선택 직후, 위·아래 옆 루프를 한 칸씩 함께 늘린다"),
     (MESH_OT_mirror_loop_step.bl_idname, 'WHEELUPMOUSE', 'PRESS',
-     {'ctrl': True}, {'direction': 1, 'both_sides': False}),
+     {'ctrl': True}, {'direction': 1, 'both_sides': False},
+     "한 방향 확장 (휠 업)",
+     "루프 선택 직후, 한쪽 옆 루프를 한 칸 늘린다"),
     (MESH_OT_mirror_loop_step.bl_idname, 'WHEELDOWNMOUSE', 'PRESS',
-     {'alt': True}, {'direction': -1, 'both_sides': True}),
+     {'alt': True}, {'direction': -1, 'both_sides': True},
+     "위·아래 동시 축소 (휠 다운)",
+     "늘린 범위를 위·아래에서 한 칸씩 함께 줄인다"),
     (MESH_OT_mirror_loop_step.bl_idname, 'WHEELDOWNMOUSE', 'PRESS',
-     {'ctrl': True}, {'direction': -1, 'both_sides': False}),
+     {'ctrl': True}, {'direction': -1, 'both_sides': False},
+     "한 방향 축소 (휠 다운)",
+     "늘린 범위를 한쪽에서 한 칸 줄인다"),
 )
 
 classes = (

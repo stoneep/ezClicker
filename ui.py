@@ -112,9 +112,12 @@ def unregister_hooks():
     bpy.types.VIEW3D_HT_header.remove(draw_header_button)
 
 
-# 확장 단계 순환: 키는 비워 둔다. (Preferences > Keymap > Mesh 에서 지정)
+# 확장 단계 순환: 키는 비워 둔다. (환경설정의 단축키 목록이나 Preferences > Keymap > Mesh 에서 지정)
+# (idname, 키, 값, 수식키, 오퍼레이터 속성, 환경설정에 보일 제목, 한 줄 설명)
 KEYMAPS = (
-    (MESH_OT_mirror_loop_level.bl_idname, 'NONE', 'PRESS', {}, {'level': 'CYCLE'}),
+    (MESH_OT_mirror_loop_level.bl_idname, 'NONE', 'PRESS', {}, {'level': 'CYCLE'},
+     "확장 단계 순환",
+     "끔 → 1단계 → 2단계 순서로 전환 (기본 키 없음, 원하는 키를 지정해서 쓴다)"),
 )
 
 classes = (
