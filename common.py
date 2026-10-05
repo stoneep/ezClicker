@@ -63,18 +63,6 @@ def pick_seed(context, ob, bm, indices, mouse):
     return best if best is not None else bm.edges[next(iter(indices))]
 
 
-def make_projector(context, ob):
-    """오브젝트 로컬 좌표 -> 리전(화면) 2D 좌표 함수. 3D 뷰가 아니거나 화면 밖이면 None 을 돌려준다."""
-    region, rv3d = context.region, context.region_data
-    mw = ob.matrix_world
-
-    def project(co):
-        if region is None or rv3d is None:
-            return None
-        return view3d_utils.location_3d_to_region_2d(region, rv3d, mw @ co)
-    return project
-
-
 def screen_mid(context, ob, e):
     """엣지 중점의 화면(리전) 좌표. 3D 뷰가 아니면 None."""
     region, rv3d = context.region, context.region_data

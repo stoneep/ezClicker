@@ -8,10 +8,13 @@ state.py — 모듈 사이에서 공유하는 런타임 상태.
            None 이면 휠 오퍼레이터의 poll 이 실패해서 휠은 Blender 기본 동작으로 넘어간다.
   anchor : 마지막으로 선택한 루프(시작 루프).
            Ctrl+Alt+클릭(사이 선택)이 이걸 기준으로 사이를 채운다.
+  keymap_items : __init__.register() 가 등록한 단축키 목록. 환경설정(prefs)이 이걸 보고 그린다.
+           각 항목은 {'idname', 'kmi', 'km_name', 'title', 'desc'} 딕셔너리.
 """
 
 wheel = None
 anchor = None
+keymap_items = []
 
 
 def reset_wheel():
