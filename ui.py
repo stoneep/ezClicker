@@ -16,7 +16,7 @@ ui.py — 확장 단계 전환 UI와 기능 메뉴 (3D 뷰포트 헤더 버튼 /
 """
 
 import bpy
-from bpy.props import EnumProperty
+from bpy.props import BoolProperty, EnumProperty, IntProperty
 
 from . import prefs, state
 from .settings import LEVEL_ICON, LEVEL_ITEMS, LEVEL_SHORT, get_settings
@@ -55,6 +55,123 @@ class MESH_OT_mirror_loop_level(bpy.types.Operator):
         return {'FINISHED'}
 
 
+def _redraw(context):
+    if context.screen:
+        for area in context.screen.areas:
+            area.tag_redraw()
+
+
+def view3d_override(context):
+    """
+    팝업/헤더에서 누른 버튼은 3D 뷰의 '작업 영역'이 아닌 곳의 컨텍스트로 실행된다.
+    화면 기준(휠 확장의 위/아래)이나 마우스 위치를 쓰는 기능은 3D 뷰 영역으로 바꿔서 실행해야 한다.
+    {window, area, region} 또는 못 찾으면 None.
+    """
+    screen = context.screen
+    if screen is None:
+        return None
+    area = context.area if (context.area and context.area.type == 'VIEW_3D') else \
+        next((a for a in screen.areas if a.type == 'VIEW_3D'), None)
+    if area is None:
+        return None
+    region = next((r for r in area.regions if r.type == 'WINDOW'), None)
+    if region is None:
+        return None
+    return {'window': context.window, 'area': area, 'region': region}
+
+
+def _call(context, idname, props, mode='INVOKE_DEFAULT'):
+    """'mesh.xxx' 형태 idname 의 오퍼레이터를 3D 뷰 컨텍스트로 호출한다."""
+    group, name = idname.split(".")
+    func = getattr(getattr(bpy.ops, group), name)
+    ov = view3d_override(context)
+    if ov is None:
+        return func(mode, **props)
+    with context.temp_override(**ov):
+        return func(mode, **props)
+
+
+def _set_hint(context, text):
+    """대기 중임을 알린다: 상태 표시줄 글자 + 십자 커서. text 가 None 이면 되돌린다."""
+    try:
+        if context.workspace:
+            context.workspace.status_text_set(text)
+        if context.window:
+            if text is None:
+                context.window.cursor_modal_restore()
+            else:
+                context.window.cursor_modal_set('CROSSHAIR')
+    except (AttributeError, RuntimeError):
+        pass
+
+
+class MESH_OT_mirror_menu_run(bpy.types.Operator):
+    """메뉴에서 기능을 클릭으로 실행: 클릭 기능은 '다음 클릭 한 번'을 기다리고, 그 외는 바로 실행한다"""
+    bl_idname = "mesh.mirror_menu_run"
+    bl_label = "Run Mirror Loop Feature"
+    bl_options = {'INTERNAL'}
+
+    index: IntProperty(default=0, min=0)
+
+    @classmethod
+    def poll(cls, context):
+        return context.mode == 'EDIT_MESH'
+
+    def execute(self, context):
+        if self.index >= len(state.keymap_items):
+            return {'CANCELLED'}
+        entry = state.keymap_items[self.index]
+        if entry['click']:
+            if state.armed:
+                _set_hint(context, None)
+            state.arm(entry)
+            _set_hint(context, "%s: 3D 뷰에서 클릭하면 실행됩니다 (Esc = 취소)" % entry['title'])
+            _redraw(context)
+            self.report({'INFO'}, "%s: 3D 뷰를 클릭하세요 (Esc = 취소)" % entry['title'])
+            return {'FINISHED'}
+        try:
+            result = _call(context, entry['idname'], entry['props'])
+        except RuntimeError:
+            # 실행 조건이 안 맞는 경우. (예: 휠 확장은 루프를 선택한 직후에만 쓸 수 있다)
+            self.report({'WARNING'}, "지금은 '%s'을(를) 실행할 수 없습니다. 휠 확장은 루프를 막 선택한 직후에만 됩니다."
+                        % entry['title'])
+            return {'CANCELLED'}
+        _redraw(context)
+        return {'FINISHED'} if 'FINISHED' in result else {'CANCELLED'}
+
+
+class MESH_OT_mirror_armed_click(bpy.types.Operator):
+    """(내부용) 메뉴에서 대기시킨 기능을 다음 왼쪽 클릭에 실행하거나, Esc 로 취소한다"""
+    bl_idname = "mesh.mirror_armed_click"
+    bl_label = "Mirror Loop Armed Click"
+    bl_options = {'INTERNAL'}
+
+    cancel: BoolProperty(default=False)
+
+    @classmethod
+    def poll(cls, context):
+        # 대기 중이 아닐 때는 poll 이 실패해서 평소 클릭/Esc 가 그대로 동작한다.
+        return state.armed is not None and context.mode == 'EDIT_MESH'
+
+    def invoke(self, context, event):
+        armed = state.armed
+        state.disarm()
+        _set_hint(context, None)
+        _redraw(context)
+        if self.cancel or armed is None:
+            return {'FINISHED'}              # Esc 를 삼켜서 대기만 푼다
+        try:
+            result = _call(context, armed['idname'], armed['props'])
+        except RuntimeError:
+            self.report({'WARNING'}, "'%s'을(를) 실행할 수 없습니다 (확장 단계가 '끔'이거나 편집 모드가 아닙니다)" % armed['title'])
+            return {'CANCELLED'}
+        if 'FINISHED' in result:
+            return {'FINISHED'}
+        if 'PASS_THROUGH' in result:
+            return {'CANCELLED', 'PASS_THROUGH'}   # 대상이 없는 곳이면 평소 클릭으로 넘긴다
+        return {'CANCELLED'}
+
+
 POPUP_IDNAME = "wm.call_panel"      # 팝업을 여는 키맵 항목의 오퍼레이터
 
 
@@ -85,8 +202,14 @@ def draw_popup_key(layout, editable):
 
 
 def draw_features(layout):
-    """기능별 켜기/끄기 체크박스 + 현재 단축키. (바꾼 키도 반영된다.) 팝업 키는 따로 그린다."""
-    for entry in state.keymap_items:
+    """
+    기능별 한 줄:  [켜기/끄기 체크]  [실행 버튼]  단축키
+      - 체크박스는 '단축키'를 켜고 끈다. 끄면 그 키는 Blender 기본 동작으로 돌아간다.
+      - 실행 버튼은 단축키와 상관없이 메뉴에서 바로 쓴다.
+        클릭 기능(▷)은 누른 뒤 3D 뷰를 한 번 클릭하면 실행되고, 나머지(▶)는 바로 실행된다.
+      - 팝업을 여는 키는 따로 그린다.
+    """
+    for index, entry in enumerate(state.keymap_items):
         if entry['idname'] == POPUP_IDNAME:
             continue
         kmi = prefs.find_user_kmi(entry)
@@ -94,8 +217,13 @@ def draw_features(layout):
         if kmi is None:
             row.label(text=entry['title'], icon='ERROR')
             continue
-        split = row.split(factor=0.66, align=True)
-        split.prop(kmi, "active", text=entry['title'])
+        split = row.split(factor=0.7, align=True)
+        left = split.row(align=True)
+        left.prop(kmi, "active", text="")
+        armed = state.armed is not None and state.armed['title'] == entry['title']
+        left.operator(MESH_OT_mirror_menu_run.bl_idname, text=entry['title'],
+                      icon='RESTRICT_SELECT_OFF' if entry['click'] else 'PLAY',
+                      depress=armed).index = index
         key = split.row(align=True)
         key.active = kmi.active
         key.alignment = 'RIGHT'
@@ -161,9 +289,11 @@ def draw_header_button(self, context):
     s = get_settings(context)
     if s is None:
         return
+    armed = state.armed
     self.layout.popover(
         panel=VIEW3D_PT_mirror_loop_select.__name__,
-        text=LEVEL_SHORT[s.level], icon=LEVEL_ICON[s.level])
+        text=("클릭 대기: " + armed['title']) if armed else LEVEL_SHORT[s.level],
+        icon='RESTRICT_SELECT_OFF' if armed else LEVEL_ICON[s.level])
 
 
 def draw_context_menu(self, context):
@@ -205,10 +335,16 @@ KEYMAPS = (
     (MESH_OT_mirror_loop_level.bl_idname, 'NONE', 'PRESS', {}, {'level': 'CYCLE'},
      "확장 단계 순환",
      "끔→1단계→2단계 전환, 기본 키 없음"),
+    # 내부용(제목 없음 = 목록에 안 보임): 메뉴에서 대기시킨 기능을 다음 클릭에 실행 / Esc 로 취소.
+    # 대기 중이 아니면 poll 이 실패해서 평소 클릭과 Esc 는 그대로 동작한다.
+    (MESH_OT_mirror_armed_click.bl_idname, 'LEFTMOUSE', 'PRESS', {}, {'cancel': False}, None, None),
+    (MESH_OT_mirror_armed_click.bl_idname, 'ESC', 'PRESS', {}, {'cancel': True}, None, None),
 )
 
 classes = (
     MESH_OT_mirror_loop_level,
+    MESH_OT_mirror_menu_run,
+    MESH_OT_mirror_armed_click,
     MESH_MT_mirror_loop_level,
     VIEW3D_PT_mirror_loop_select,
 )
