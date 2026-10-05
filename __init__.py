@@ -16,12 +16,14 @@ Mirror Loop Select
 
   face_core.py   [면]   사각형 면 위상 헬퍼, 루프 사이의 면 모으기
   face_shape.py  [면]   평평한 면 영역의 모양 비교 (같은 모양 찾기)
+  overlay.py     면 모드 사이 선택의 시작 루프(대기 중) 임시 색 표시
   face_ops.py    [면]   Ctrl+Alt+클릭 사이 전부 / Shift+Alt+클릭 사이 루프만 / Alt+더블클릭 같은 모양 면 선택 오퍼레이터
 
 새 기능을 추가할 때
   1) edge_* 또는 face_* 쪽에 오퍼레이터를 만들고, 모듈 맨 아래에
      classes (필수), KEYMAPS (키를 줄 때), draw_settings (패널에 옵션이 필요할 때) 를 내놓는다.
      - KEYMAPS 항목: (idname, 키, 값, {수식키}, {오퍼레이터 속성}, 환경설정에 보일 제목, 한 줄 설명)
+       (제목이 None 이면 내부용 키맵이라 목록에는 보이지 않고 등록만 된다)
        (같은 idname 이면 오퍼레이터 속성 조합이 서로 달라야 환경설정이 항목을 구분할 수 있다)
      - draw_settings(layout, settings): 패널/메뉴에 옵션을 그린다. 옵션 값은 settings.MLS_Settings 에 둔다.
   2) 아래 MODULES 에 그 모듈을 넣는다. (등록·키맵·패널 연결은 자동)
@@ -42,13 +44,13 @@ bl_info = {
 if "bpy" in locals():
     import importlib
     from . import (state, common, settings, face_core, face_shape, edge_core, edge_range,
-                   edge_ops, face_ops, prefs, ui)
+                   edge_ops, face_ops, prefs, ui, overlay)
     for _m in (state, common, settings, face_core, face_shape, edge_core, edge_range,
-               edge_ops, face_ops, prefs, ui):
+               edge_ops, face_ops, prefs, ui, overlay):
         importlib.reload(_m)
 else:
     from . import (state, common, settings, face_core, face_shape, edge_core, edge_range,  # noqa: F401
-                   edge_ops, face_ops, prefs, ui)
+                   edge_ops, face_ops, prefs, ui, overlay)
 
 import bpy
 from bpy.props import PointerProperty
@@ -70,6 +72,7 @@ def register():
     # 각 기능 모듈의 설정 UI 를 패널/메뉴에 이어 붙인다.
     ui.settings_drawers[:] = [m.draw_settings for m in MODULES if hasattr(m, "draw_settings")]
     ui.register_hooks()
+    overlay.register()
 
     kc = bpy.context.window_manager.keyconfigs.addon
     if kc:
@@ -80,6 +83,8 @@ def register():
                 for name, val in props.items():
                     setattr(kmi.properties, name, val)
                 addon_keymaps.append((km, kmi))
+                if title is None:        # 내부용 키맵(Esc 취소 등)은 환경설정/메뉴의 단축키 목록에 보이지 않는다
+                    continue
                 state.keymap_items.append({
                     'idname': idname, 'kmi': kmi, 'km_name': km.name,
                     'title': title, 'desc': desc,
@@ -90,6 +95,7 @@ def unregister():
     state.reset_all()
     state.keymap_items.clear()
 
+    overlay.unregister()
     ui.unregister_hooks()
     ui.settings_drawers.clear()
 

@@ -9,6 +9,15 @@ import bmesh
 from bpy_extras import view3d_utils
 
 
+def redraw_3d(context):
+    """모든 3D 뷰를 다시 그리게 한다. (표시용 오버레이가 바뀌었을 때)"""
+    wm = context.window_manager
+    for win in wm.windows:
+        for area in win.screen.areas:
+            if area.type == 'VIEW_3D':
+                area.tag_redraw()
+
+
 def face_only_mode(context):
     """선택 모드가 '면' 하나뿐이면 True. (버텍스·엣지 모드가 같이 켜져 있으면 False)
 

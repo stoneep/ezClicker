@@ -6,6 +6,9 @@ face_ops.py — [면] 오퍼레이터와 키맵.
   Shift+Alt+클릭 : 같은 구간에서 '루프(엣지)만' 선택 (사이의 면·루프와 직각인 테두리는 제외. select_faces=False)
                    -> 둘 다 MESH_OT_mirror_loop_between (키맵의 select_faces 값만 다르다)
 
+  면 모드: 첫 클릭은 아무것도 선택하지 않고 시작 루프만 지정한다. 지정한 루프는 색 선으로 표시되고(overlay.py,
+           색/두께는 환경설정), 같은 방향의 다른 루프를 클릭하면 그 사이의 면이 선택된다. Esc 로 지정을 취소한다.
+
   버텍스 모드에서는 어느 쪽이든 루프의 버텍스를 고르면 Blender 가 그 사이 엣지·면을 자동으로 같이 선택하므로
   결과가 같다. 차이는 엣지 모드에서 가장 분명하다.
 
@@ -34,9 +37,9 @@ from bpy_extras import view3d_utils
 from mathutils import Vector
 from mathutils.bvhtree import BVHTree
 
-from . import state
+from . import prefs, state
 from .common import (ensure_tables, face_only_mode, get_mirror_axes, mesh_counts, pick_seed,
-                     restore_selection, snapshot_selection)
+                     redraw_3d, restore_selection, snapshot_selection)
 from .edge_core import find_mirror_edges, walk_loop
 from .edge_range import find_between
 from .face_core import strip_faces
@@ -135,13 +138,16 @@ class MESH_OT_mirror_loop_between(bpy.types.Operator):
         # 단, 면 모드의 첫 클릭처럼 아무것도 선택하지 않고 '대기'만 하는 시작 루프는 선택이 없어도 유효하다.
         if valid and anchor.get('selected', True) and not any(snap[ob]):
             valid = False
+        # 대기 중인 시작 루프(면 모드에서 지정)는 면 모드에서만 이어서 쓴다.
+        if valid and not anchor.get('selected', True) and not face_only_mode(context):
+            valid = False
 
         # 면 모드에서는 엣지를 고르는 게 의미가 없다. 사이의 면만 고르고, 면을 못 찾으면 아무것도 고르지 않는다.
         face_only = face_only_mode(context)
         selected = set() if face_only else target
         faces = set()
         if not valid:
-            self.report({'INFO'}, "시작 루프를 지정했습니다. 같은 방향의 다른 루프를 클릭하면 그 사이가 선택됩니다.")
+            self.report({'INFO'}, "시작 루프를 지정했습니다 (색 선으로 표시). 같은 방향의 다른 루프를 클릭하면 그 사이가 선택됩니다. Esc = 취소")
         else:
             # 3) 시작 루프에서 걸어가며 끝 루프와 만나는 곳까지 채운다.
             loops, steps = find_between(
@@ -171,7 +177,9 @@ class MESH_OT_mirror_loop_between(bpy.types.Operator):
         bmesh.update_edit_mesh(ob.data, loop_triangles=False, destructive=False)
 
         # 끝 루프를 새 앵커로 -> 이어서 Ctrl+Alt+클릭(또는 Shift+Alt+클릭)하면 B~C 구간이 선택된다.
-        state.set_anchor(ob.name, seed_b.index, counts, selected=bool(selected or faces))
+        pending = not (selected or faces)       # 면 모드 첫 클릭처럼 아무것도 선택하지 않고 대기만 하는 경우
+        state.set_anchor(ob.name, seed_b.index, counts, selected=not pending, loop=target if pending else None)
+        redraw_3d(context)
         return {'FINISHED'}
 
 
@@ -305,6 +313,36 @@ class MESH_OT_mirror_face_similar(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class MESH_OT_mirror_pending_cancel(bpy.types.Operator):
+    """(내부용) 면 모드 사이 선택에서 대기 중인 시작 루프를 Esc 로 취소"""
+    bl_idname = "mesh.mirror_pending_cancel"
+    bl_label = "Cancel Pending Start Loop"
+    bl_options = {'INTERNAL'}
+
+    @classmethod
+    def poll(cls, context):
+        # 대기 중이 아닐 때는 poll 이 실패해서 Esc 가 평소대로 동작한다.
+        a = state.anchor
+        return (context.mode == 'EDIT_MESH' and face_only_mode(context)
+                and a is not None and not a.get('selected', True))
+
+    def execute(self, context):
+        state.anchor = None
+        redraw_3d(context)
+        self.report({'INFO'}, "시작 루프 지정을 취소했습니다")
+        return {'FINISHED'}
+
+
+def draw_settings(layout, settings):
+    """패널/메뉴에 끼워 넣는 면 모드 사이 선택 설정: 시작 루프 표시 색/두께."""
+    p = prefs.get_prefs()
+    if p is None:
+        return
+    col = layout.column(align=True)
+    col.prop(p, "anchor_color")
+    col.prop(p, "anchor_width")
+
+
 # (idname, 키, 값, 수식키, 오퍼레이터 속성, 환경설정에 보일 제목, 한 줄 설명)
 KEYMAPS = (
     (MESH_OT_mirror_loop_between.bl_idname, 'LEFTMOUSE', 'PRESS', {'ctrl': True, 'alt': True},
@@ -319,9 +357,12 @@ KEYMAPS = (
      {'pick': True},
      "같은 모양 면 선택",
      "클릭한 면과 같은 모양(회전·거울 무관)의 평면을 전부 선택"),
+    # 내부용(제목 없음 = 목록에 안 보임): 면 모드에서 대기 중인 시작 루프를 Esc 로 취소
+    (MESH_OT_mirror_pending_cancel.bl_idname, 'ESC', 'PRESS', {}, {}, None, None),
 )
 
 classes = (
     MESH_OT_mirror_loop_between,
     MESH_OT_mirror_face_similar,
+    MESH_OT_mirror_pending_cancel,
 )

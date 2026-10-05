@@ -27,11 +27,13 @@ def set_wheel(st):
     wheel = st
 
 
-def set_anchor(ob_name, seed_index, counts, selected=True):
+def set_anchor(ob_name, seed_index, counts, selected=True, loop=None):
     """selected: 시작 루프가 선택된 상태로 남았는지. 면 모드에서 첫 클릭처럼 아무것도 선택하지 않고
-    '대기'만 하는 경우는 False. (선택이 비었을 때 앵커를 버릴지 정하는 데 쓴다)"""
+    '대기'만 하는 경우는 False. (선택이 비었을 때 앵커를 버릴지 정하는 데 쓴다)
+    loop: 시작 루프의 엣지 인덱스 리스트. 대기 중일 때 3D 뷰에 색 선으로 표시하는 데 쓴다. (overlay.py)"""
     global anchor
-    anchor = {'ob': ob_name, 'seed': seed_index, 'counts': counts, 'selected': selected}
+    anchor = {'ob': ob_name, 'seed': seed_index, 'counts': counts, 'selected': selected,
+              'loop': sorted(loop) if loop else None}
 
 
 def reset_all():
