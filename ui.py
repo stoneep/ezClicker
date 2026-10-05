@@ -117,7 +117,7 @@ def unregister_hooks():
 KEYMAPS = (
     (MESH_OT_mirror_loop_level.bl_idname, 'NONE', 'PRESS', {}, {'level': 'CYCLE'},
      "확장 단계 순환",
-     "끔 → 1단계 → 2단계 순서로 전환 (기본 키 없음, 원하는 키를 지정해서 쓴다)"),
+     "끔→1단계→2단계 전환, 기본 키 없음"),
 )
 
 classes = (
