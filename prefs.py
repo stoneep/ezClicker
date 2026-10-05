@@ -47,6 +47,23 @@ def find_user_kmi(entry):
     return None
 
 
+_KEY_NAMES = {
+    'LEFTMOUSE': "LMB", 'RIGHTMOUSE': "RMB", 'MIDDLEMOUSE': "MMB",
+    'WHEELUPMOUSE': "휠↑", 'WHEELDOWNMOUSE': "휠↓",
+}
+
+
+def key_text(kmi):
+    """키맵 항목의 단축키 표시: 'Ctrl+Alt+LMB', 'Alt+휠↑', 'Alt+LMB 더블클릭', 키가 없으면 '키 없음'."""
+    if kmi.type == 'NONE':
+        return "키 없음"
+    mods = [n for n, on in (("Ctrl", kmi.ctrl), ("Shift", kmi.shift), ("Alt", kmi.alt), ("OS", kmi.oskey)) if on]
+    text = "+".join(mods + [_KEY_NAMES.get(kmi.type, kmi.type)])
+    if kmi.value == 'DOUBLE_CLICK':
+        text += " 더블클릭"
+    return text
+
+
 class MLS_Preferences(bpy.types.AddonPreferences):
     bl_idname = __package__
 
