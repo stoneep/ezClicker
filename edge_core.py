@@ -104,9 +104,9 @@ def crease_adjust(v, e_in, base, cands):
     """
     기본 규칙이 고른 base(없으면 None)를 크리스 정보로 보정해 최종 엣지를 반환한다.
 
-    A) 크리스 장벽: 부드러운 엣지가 '한 줄의 날카로운 크리스'에 닿으면 거기서 끝난다.
-       교차선 위의 T접합(3극)이 대표적이고, n-gon 이 붙은 4극 이상에서는 교차선을 사이에 두고
-       양쪽에서 마주 오는 십자 접합도 막는다. (사각형만 있는 4극은 기본 규칙을 믿는다.)
+    A) 크리스 장벽: 부드러운 엣지가 '한 줄의 날카로운 크리스' 위로 꺾여 들어가려 하면 거기서 끝난다.
+       교차선 위의 T접합(3극)이 대표적이다. 크리스를 건너 반대편으로 이어가거나 스치듯 지나가는 링은
+       정상이므로 막지 않는다. (n-gon 이 붙은 4극 이상에서도 같다. 사각형만 있는 4극은 기본 규칙을 믿는다.)
     B) 크리스 따라가기: 날카로운 엣지(교차선)를 걷는 중인데 기본 규칙이 멈췄거나 훨씬 부드러운
        엣지로 새려 하면, 같은 성격의 크리스 엣지가 정확히 하나일 때 그쪽으로 이어간다.
     """
@@ -120,9 +120,14 @@ def crease_adjust(v, e_in, base, cands):
         for i in range(len(sharp)):
             for j in range(i + 1, len(sharp)):
                 (e1, a1), (e2, a2) = sharp[i], sharp[j]
-                if abs(a1 - a2) <= CREASE_SIMILAR and dirs[e1].dot(dirs[e2]) <= CREASE_LINE_COS:
+                if abs(a1 - a2) > CREASE_SIMILAR or dirs[e1].dot(dirs[e2]) > CREASE_LINE_COS:
+                    continue
+                # 크리스 라인이 있고, 기본 규칙이 그 라인 위로 꺾어 들어가려 하면(또는 이미 멈췄으면) 끝낸다.
+                # 라인을 건너 반대편으로 이어가는 경우는 막지 않는다: 같은 물체의 하드 엣지(육각·팔각 기둥,
+                # 박스 모서리)를 도는 정상적인 링과 교차선 건너기를 정점 하나만 보고는 구분할 수 없고,
+                # 막으면 링이 모서리에서 끊겨 일부만 선택된다. 스치기만 하는 링도 마찬가지로 막지 않는다.
+                if base is None or base in (e1, e2):
                     return None
-
     if ang_in >= CREASE_MIN and (base is None or crease_angle(base) <= ang_in - CREASE_GAP):
         sig_in = edge_signature(e_in)
         like = [e for e in cands
