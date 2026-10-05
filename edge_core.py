@@ -5,6 +5,7 @@ bmesh 만 다루고 오퍼레이터/UI 는 모른다.
 
   1) 다이헤드럴(면 사이 각도) 보조 점수
   2) 루프 워커: 극점(3/5극), 삼각형, N-gon 에서도 멈추지 않고 이어서 진행
+     - 크리스 인식: 불리언 유니온 등으로 생긴 교차선에서 엣지가 다른 표면으로 새지 않게 보정
   3) 미러 확장: 미러 축에서 끊긴 반대편 루프 찾기
 """
 
@@ -70,13 +71,88 @@ def dihedral_match(a, b):
 
 STRAIGHT_COS = math.cos(math.radians(25.0))  # 이 안쪽이면 '일직선'으로 본다
 
+# 크리스(꺾임) 인식: 불리언 유니온처럼 서로 다른 표면이 만나는 교차선 처리용.
+#
+# 교차선(seam)은 양쪽 면이 크게 꺾인 '크리스 라인'이고, 교차선에 부딪혀 끝나는 엣지(관통당한 쪽의
+# 링/세로 엣지)는 훨씬 부드럽다. 위상만 보면 이런 정점도 일반 3극/4극과 구별되지 않아서,
+# 부드러운 엣지가 교차선으로 꺾여 들어가거나 반대편 표면의 엣지로 건너가는 일이 생겼다.
+# 기본 규칙(_next_edge_base)의 결과가 명백히 틀린 경우에만 보정한다.
+CREASE_MIN = math.radians(30.0)               # 이 이상 꺾여야 '크리스'로 본다
+CREASE_GAP = math.radians(25.0)               # 크리스는 부드러운 엣지보다 이만큼 더 날카로워야 한다
+CREASE_SIMILAR = math.radians(35.0)           # 같은 크리스로 이어지는 엣지끼리 허용하는 꺾임 각도 차이
+CREASE_LINE_COS = math.cos(math.radians(120.0))   # 두 크리스 엣지 사이 각이 이 이상이면 '한 라인'
+CREASE_MATCH = 0.7                            # 크리스 이어가기에 필요한 다이헤드럴 유사도
+CREASE_STRAIGHT_SLACK = 0.25                  # 크리스 쪽이 기본 선택보다 이만큼(코사인)까지 덜 직진이어도 허용
+
+
+def crease_angle(e):
+    """엣지 양쪽 면 사이의 꺾임 각도. 면이 없거나 한 장이면 0."""
+    sig = edge_signature(e)
+    return sig[1] if sig else 0.0
+
+
+def has_ngon(v):
+    """v 에 5각형 이상의 면이 붙어 있으면 True. (불리언 등으로 잘린 면의 잔해)
+
+    이런 면 주변에서는 '맞은편 엣지' 규칙이 믿을 수 없다. 반대로 트라이팬 캡 같은 삼각형·사각형만 있는
+    곳은 Blender 기본 규칙이 맞으므로 건드리지 않는다.
+    """
+    return any(len(f.verts) >= 5 for f in v.link_faces if not f.hide)
+
+
+def crease_adjust(v, e_in, base, cands):
+    """
+    기본 규칙이 고른 base(없으면 None)를 크리스 정보로 보정해 최종 엣지를 반환한다.
+
+    A) 크리스 장벽: 부드러운 엣지가 '한 줄의 날카로운 크리스'에 닿으면 거기서 끝난다.
+       교차선 위의 T접합(3극)이 대표적이고, n-gon 이 붙은 4극 이상에서는 교차선을 사이에 두고
+       양쪽에서 마주 오는 십자 접합도 막는다. (사각형만 있는 4극은 기본 규칙을 믿는다.)
+    B) 크리스 따라가기: 날카로운 엣지(교차선)를 걷는 중인데 기본 규칙이 멈췄거나 훨씬 부드러운
+       엣지로 새려 하면, 같은 성격의 크리스 엣지가 정확히 하나일 때 그쪽으로 이어간다.
+    """
+    ang_in = crease_angle(e_in)
+    d_in = (v.co - e_in.other_vert(v).co).normalized()
+    dirs = {e: (e.other_vert(v).co - v.co).normalized() for e in cands}
+
+    sharp = [(e, crease_angle(e)) for e in cands]
+    sharp = [(e, a) for e, a in sharp if a >= CREASE_MIN and a >= ang_in + CREASE_GAP]
+    if len(v.link_edges) == 3 or has_ngon(v):
+        for i in range(len(sharp)):
+            for j in range(i + 1, len(sharp)):
+                (e1, a1), (e2, a2) = sharp[i], sharp[j]
+                if abs(a1 - a2) <= CREASE_SIMILAR and dirs[e1].dot(dirs[e2]) <= CREASE_LINE_COS:
+                    return None
+
+    if ang_in >= CREASE_MIN and (base is None or crease_angle(base) <= ang_in - CREASE_GAP):
+        sig_in = edge_signature(e_in)
+        like = [e for e in cands
+                if crease_angle(e) >= CREASE_MIN
+                and abs(crease_angle(e) - ang_in) <= CREASE_SIMILAR
+                and dihedral_match(sig_in, edge_signature(e)) >= CREASE_MATCH]
+        # 비슷한 크리스가 둘 이상이면(큐브 모서리 등) 모호하므로 건드리지 않는다.
+        # 기본 규칙이 고른 엣지보다 크게 덜 직진인 쪽으로는 바꾸지 않는다.
+        if len(like) == 1 and like[0] is not base:
+            c = like[0]
+            dot_c = dirs[c].dot(d_in)
+            if dot_c > RELAX_COS and (base is None or dot_c >= dirs[base].dot(d_in) - CREASE_STRAIGHT_SLACK):
+                return c
+    return base
+
 
 def next_edge(v, e_in, cos_limit, dih=True):
     """v에 e_in으로 들어왔을 때 이어갈 엣지를 고른다. 없으면 None."""
     cands = [e for e in v.link_edges if e is not e_in and not e.hide]
     if not cands:
         return None
+    base = _next_edge_base(v, e_in, cands, cos_limit, dih)
+    # 순수 사각형 4극 정점은 Blender 기본 규칙이 정답이다. 다이헤드럴을 안 쓰면 보정도 하지 않는다.
+    if not dih or (len(v.link_edges) == 4 and not has_ngon(v)):
+        return base
+    return crease_adjust(v, e_in, base, cands)
 
+
+def _next_edge_base(v, e_in, cands, cos_limit, dih):
+    """크리스 보정 전의 기본 규칙. (cands: v 에 붙은 숨기지 않은 엣지 중 e_in 제외)"""
     # e_in 과 면을 하나도 공유하지 않는 엣지 = 면 기준으로 '맞은편' 엣지
     faces_in = set(e_in.link_faces)
     opposite = [e for e in cands if not (faces_in & set(e.link_faces))]
