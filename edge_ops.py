@@ -9,25 +9,151 @@ edge_ops.py — [엣지] 오퍼레이터와 키맵.
 루프 선택 직후 왼쪽 아래에 Blender 의 '마지막 작업 조정' 패널이 뜬다. 거기서 '위쪽/아래쪽 루프'를 +/- 로 조절하면
 휠 확장과 같은 결과를 얻는다. (Alt+휠을 안 쓰는 사람이 마우스만으로 범위를 조절하는 용도)
 
+사이드바(N)의 'Mirror Loop' 탭(고정 패널, 임시 키 Alt+1)에서도 같은 폭/길이/링 값을 +/- 로 조절한다.
+패널은 닫기 전까지 열려 있고 휠 확장과 숫자가 서로 맞는다.     -> MESH_OT_mirror_loop_adjust, MESH_OT_mirror_loop_panel
+(값이 바뀔 때마다 클릭 전 선택에서 다시 시작해 run_selection 으로 처음부터 계산한다.)
+
 휠은 루프 선택 직후에만 poll 이 통과하므로, 그 외에는 기본 Alt+휠(프레임 이동)/Ctrl+휠 동작이 유지된다.
 끔 단계에서는 poll 이 실패해 Blender 기본 Alt+클릭(루프 선택)이 그대로 동작한다.
 """
 
 import math
+from types import SimpleNamespace
 
 import bpy
 import bmesh
-from bpy.props import BoolProperty, FloatProperty, IntProperty, StringProperty
+from bpy.props import BoolProperty, EnumProperty, FloatProperty, IntProperty, StringProperty
 from mathutils import Vector
 
 from . import state
-from .common import (ensure_tables, face_only_mode, get_mirror_axes, mesh_counts, pick_seed,
+from .common import (adjust_valid, ensure_tables, face_only_mode, get_mirror_axes, mesh_counts, pick_seed, redraw_3d,
                      restore_selection, snapshot_selection)
 from .edge_core import find_mirror_edges, trimmed_loop, walk_loop
 from .edge_range import (apply_range, build_offset, new_wheel_state, ring_edges, state_valid,
                          step_both_sides, step_one_side)
 from .face_core import init_faces
 from .settings import extension_enabled, get_settings, use_mirror_extension
+
+
+ADJUST_STEP_MAX = 50       # 폭(위/아래) 한 쪽의 최대 줄 수. 오퍼레이터 속성의 max 와 같다
+ADJUST_LENGTH_MIN = -200   # 길이 줄이기 한계. 오퍼레이터 속성의 min 과 같다
+
+
+def expand_sides(context, ob, bm, seed, st, steps_up, steps_down):
+    """위/아래 값만큼 옆 루프를 더 선택한다. 휠 확장과 같은 상태(lo/hi)로 남겨서 휠을 이어 쓸 수 있다."""
+    if not (steps_up or steps_down):
+        return
+    st['faces'][0] = init_faces(context, ob, seed)
+    lo = hi = 0
+    for k in range(1, steps_up + 1):
+        if not build_offset(bm, st, k):
+            break
+        hi = k
+    for k in range(1, steps_down + 1):
+        if not build_offset(bm, st, -k):
+            break
+        lo = -k
+    if (lo, hi) != (0, 0):
+        apply_range(bm, st, lo, hi)
+        st['lo'], st['hi'] = lo, hi
+
+
+def run_selection(context, p):
+    """
+    루프 선택의 본체. 오퍼레이터(execute)와 고정 패널(MESH_OT_mirror_loop_adjust)이 같이 쓴다.
+
+    p : 값을 담은 객체. 필요한 속성 — seed_object, seed_edge, default_edges, do_select, replace, use_ring,
+        steps_up, steps_down, length_adjust, max_angle, threshold, use_dihedral
+    반환: ('FINISHED' 또는 'CANCELLED', 경고 메시지 또는 None)
+    선택에 성공하면 앵커, 휠 확장 상태, 고정 패널용 조절 상태(state.adjust)를 함께 갱신한다.
+    """
+    state.reset_wheel()
+    state.reset_adjust()
+    ob = next((o for o in context.objects_in_mode_unique_data if o.name == p.seed_object), None)
+    if ob is None or p.seed_edge < 0:
+        return 'CANCELLED', "Alt+클릭으로 루프를 선택해야 이 패널을 쓸 수 있습니다"
+
+    snap = snapshot_selection([ob])        # 이 선택을 적용하기 전의 선택. 고정 패널이 값을 바꿀 때마다 여기서 다시 시작한다.
+    if p.replace:
+        bpy.ops.mesh.select_all(action='DESELECT')
+    bm = bmesh.from_edit_mesh(ob.data)    # 위 연산 뒤에는 다시 받는다
+    ensure_tables(bm)
+    if p.seed_edge >= len(bm.edges):
+        return 'CANCELLED', None
+
+    settings = get_settings(context)
+    use_wheel = settings is None or settings.use_wheel
+    cos_limit = math.cos(p.max_angle)
+    dih = p.use_dihedral
+    if dih:
+        bm.normal_update()   # 다이헤드럴 계산에 쓰는 면 법선을 최신으로
+
+    seed = bm.edges[p.seed_edge]
+    params = {
+        'seed_object': p.seed_object, 'seed_edge': p.seed_edge, 'default_edges': p.default_edges,
+        'do_select': p.do_select, 'replace': p.replace, 'use_ring': p.use_ring,
+        'steps_up': p.steps_up, 'steps_down': p.steps_down, 'length_adjust': p.length_adjust,
+        'max_angle': p.max_angle, 'threshold': p.threshold, 'use_dihedral': p.use_dihedral,
+    }
+
+    # 링: 루프가 아니라 클릭한 엣지와 나란히 쌓인 엣지 한 줄. 폭/길이/미러/기본 루프 결과는 쓰지 않는다.
+    if p.do_select and p.use_ring:
+        ring = ring_edges(seed)
+        for e in ring:
+            e.select_set(True)
+        bm.select_flush_mode()
+        state.set_anchor(ob.name, seed.index, mesh_counts(bm))
+        state.set_adjust({'ob': ob.name, 'params': params, 'snap': snap, 'counts': mesh_counts(bm),
+                          'core': {e.index for e in ring}, 'up': 0, 'down': 0, 'keep': 0, 'total': 0})
+        bmesh.update_edit_mesh(ob.data, loop_triangles=False, destructive=False)
+        return 'FINISHED', None
+
+    # 씨앗에서 직접 끝까지 걸어 루프를 완성하고 미러 반대편까지 확장
+    loop = walk_loop(seed, cos_limit, dih)
+    full_idxs = {e.index for e in loop}
+    total = len(loop)
+    # 1단계에서는 미러 반대편을 확장하지 않는다.
+    axes = get_mirror_axes(ob) if use_mirror_extension(context) else []
+
+    # 길이 줄이기: 클릭한 엣지를 가운데로 엣지를 keep 개만 남긴다.
+    # 줄이는 동안에는 미러 반대편과 '기본 루프가 고른 엣지'(루프 전체)를 쓰지 않는다.
+    keep, ref_dir = 0, None
+    if p.do_select and p.length_adjust < 0:
+        keep = max(1, len(loop) + p.length_adjust)
+        if keep < len(loop):
+            window, _n, ref_dir = trimmed_loop(seed, cos_limit, dih, keep)
+            loop = window
+            axes = []
+        else:
+            keep = 0
+    mirror = find_mirror_edges(bm, loop, axes, p.threshold, cos_limit, dih) if axes else []
+    for e in loop:
+        e.select_set(p.do_select)
+    for e in mirror:
+        e.select_set(p.do_select)
+    if not keep:
+        for i in (int(s) for s in p.default_edges.split(",") if s):
+            if i < len(bm.edges):
+                bm.edges[i].select_set(p.do_select)
+    bm.select_flush_mode()
+
+    # 선택한 경우에만 '사이 채우기' 앵커, 휠 확장 상태, 고정 패널용 조절 상태를 저장한다.
+    if p.do_select:
+        state.set_anchor(ob.name, seed.index, mesh_counts(bm))
+        core = {e.index for e in loop} | {e.index for e in mirror}
+        st = new_wheel_state(ob, bm, seed, core, axes, p.threshold, cos_limit, dih, full_idxs)
+        st['keep'], st['ref_dir'] = keep, ref_dir
+        expand_sides(context, ob, bm, seed, st, p.steps_up, p.steps_down)
+        if use_wheel:
+            state.set_wheel(st)
+        # 실제로 늘어난 폭을 기억해서(막혀서 덜 늘어났을 수 있다) 패널의 숫자와 +/- 가 맞게 한다.
+        params['steps_up'], params['steps_down'] = st['hi'], -st['lo']
+        state.set_adjust({'ob': ob.name, 'params': params, 'snap': snap, 'counts': mesh_counts(bm),
+                          'core': core, 'up': st['hi'], 'down': -st['lo'],
+                          'keep': keep, 'total': total})
+
+    bmesh.update_edit_mesh(ob.data, loop_triangles=False, destructive=False)
+    return 'FINISHED', None
 
 
 class MESH_OT_mirror_loop_select(bpy.types.Operator):
@@ -165,104 +291,17 @@ class MESH_OT_mirror_loop_select(bpy.types.Operator):
         return self.execute(context)
 
     def execute(self, context):
-        state.reset_wheel()
-        ob = next((o for o in context.objects_in_mode_unique_data if o.name == self.seed_object), None)
-        if ob is None or self.seed_edge < 0:
-            self.report({'WARNING'}, "Alt+클릭으로 루프를 선택해야 이 패널을 쓸 수 있습니다")
-            return {'CANCELLED'}
-
-        if self.replace:
-            bpy.ops.mesh.select_all(action='DESELECT')
-        bm = bmesh.from_edit_mesh(ob.data)    # 위 연산 뒤에는 다시 받는다
-        ensure_tables(bm)
-        if self.seed_edge >= len(bm.edges):
-            return {'CANCELLED'}
-
-        settings = get_settings(context)
-        use_wheel = settings is None or settings.use_wheel
-        cos_limit = math.cos(self.max_angle)
-        dih = self.use_dihedral
-        if dih:
-            bm.normal_update()   # 다이헤드럴 계산에 쓰는 면 법선을 최신으로
-
-        seed = bm.edges[self.seed_edge]
-
-        # 링: 루프가 아니라 클릭한 엣지와 나란히 쌓인 엣지 한 줄. 폭/길이/미러/기본 루프 결과는 쓰지 않는다.
-        if self.do_select and self.use_ring:
-            for e in ring_edges(seed):
-                e.select_set(True)
-            bm.select_flush_mode()
-            state.set_anchor(ob.name, seed.index, mesh_counts(bm))
-            bmesh.update_edit_mesh(ob.data, loop_triangles=False, destructive=False)
-            return {'FINISHED'}
-
-        # 씨앗에서 직접 끝까지 걸어 루프를 완성하고 미러 반대편까지 확장
-        loop = walk_loop(seed, cos_limit, dih)
-        full_idxs = {e.index for e in loop}
-        # 1단계에서는 미러 반대편을 확장하지 않는다.
-        axes = get_mirror_axes(ob) if use_mirror_extension(context) else []
-
-        # 길이 줄이기: 클릭한 엣지를 가운데로 엣지를 keep 개만 남긴다.
-        # 줄이는 동안에는 미러 반대편과 '기본 루프가 고른 엣지'(루프 전체)를 쓰지 않는다.
-        keep, ref_dir = 0, None
-        if self.do_select and self.length_adjust < 0:
-            keep = max(1, len(loop) + self.length_adjust)
-            if keep < len(loop):
-                window, _n, ref_dir = trimmed_loop(seed, cos_limit, dih, keep)
-                loop = window
-                axes = []
-            else:
-                keep = 0
-        mirror = find_mirror_edges(bm, loop, axes, self.threshold, cos_limit, dih) if axes else []
-        for e in loop:
-            e.select_set(self.do_select)
-        for e in mirror:
-            e.select_set(self.do_select)
-        if not keep:
-            for i in (int(s) for s in self.default_edges.split(",") if s):
-                if i < len(bm.edges):
-                    bm.edges[i].select_set(self.do_select)
-        bm.select_flush_mode()
-
-        # 선택한 경우에만 '사이 채우기' 앵커와 휠 확장용 상태를 저장한다.
-        if self.do_select:
-            state.set_anchor(ob.name, seed.index, mesh_counts(bm))
-            if use_wheel:
-                st = new_wheel_state(
-                    ob, bm, seed,
-                    {e.index for e in loop} | {e.index for e in mirror},
-                    axes, self.threshold, cos_limit, dih, full_idxs)
-                st['keep'], st['ref_dir'] = keep, ref_dir
-                self._expand(context, ob, bm, seed, st)
-                state.set_wheel(st)
-
-        bmesh.update_edit_mesh(ob.data, loop_triangles=False, destructive=False)
-        return {'FINISHED'}
-
-    def _expand(self, context, ob, bm, seed, st):
-        """패널의 위/아래 값만큼 옆 루프를 더 선택한다. 휠 확장과 같은 상태(lo/hi)로 남겨서 휠을 이어 쓸 수 있다."""
-        if not (self.steps_up or self.steps_down):
-            return
-        st['faces'][0] = init_faces(context, ob, seed)
-        lo = hi = 0
-        for k in range(1, self.steps_up + 1):
-            if not build_offset(bm, st, k):
-                break
-            hi = k
-        for k in range(1, self.steps_down + 1):
-            if not build_offset(bm, st, -k):
-                break
-            lo = -k
-        if (lo, hi) != (0, 0):
-            apply_range(bm, st, lo, hi)
-            st['lo'], st['hi'] = lo, hi
+        status, msg = run_selection(context, self)
+        if msg:
+            self.report({'WARNING'}, msg)
+        return {status}
 
 
 class MESH_OT_mirror_loop_step(bpy.types.Operator):
     """루프 선택 후 휠: 옆 루프까지 선택 범위를 늘리거나 줄인다 (Alt = 위·아래 동시, Ctrl = 한 방향)"""
     bl_idname = "mesh.mirror_loop_step"
     bl_label = "Mirror Loop Step"
-    bl_options = {'UNDO'}  # execute 가 없어서 REGISTER(리두 패널)는 쓰지 않는다
+    bl_options = {'UNDO'}  # 다시 실행(redo)할 값이 없어서 REGISTER(리두 패널)는 쓰지 않는다
 
     direction: IntProperty(name="Direction", default=1, min=-1, max=1)
     both_sides: BoolProperty(
@@ -279,6 +318,9 @@ class MESH_OT_mirror_loop_step(bpy.types.Operator):
                 and ob is not None and ob.name == st['ob'])
 
     def invoke(self, context, event):
+        return self.execute(context)
+
+    def execute(self, context):
         ob = context.edit_object
         bm = bmesh.from_edit_mesh(ob.data)
         ensure_tables(bm)
@@ -309,7 +351,100 @@ class MESH_OT_mirror_loop_step(bpy.types.Operator):
         new_lo, new_hi = result
         apply_range(bm, st, new_lo, new_hi)
         st['lo'], st['hi'] = new_lo, new_hi
+        adj = state.adjust
+        if adj is not None and adj['ob'] == ob.name:     # 고정 패널의 숫자와 다시 계산할 값도 맞춘다
+            adj['up'], adj['down'] = new_hi, -new_lo
+            adj['params']['steps_up'], adj['params']['steps_down'] = new_hi, -new_lo
+        redraw_3d(context)
         bmesh.update_edit_mesh(ob.data, loop_triangles=False, destructive=False)
+        return {'FINISHED'}
+
+
+class MESH_OT_mirror_loop_adjust(bpy.types.Operator):
+    """고정 패널의 +/- 버튼: 마지막 루프 선택의 폭(위/아래), 길이, 링을 바꿔서 다시 선택한다"""
+    bl_idname = "mesh.mirror_loop_adjust"
+    bl_label = "Mirror Loop Adjust"
+    bl_options = {'UNDO'}      # 값은 패널에 보이므로 왼쪽 아래 '마지막 작업' 패널(REGISTER)은 쓰지 않는다
+
+    target: EnumProperty(
+        name="Target",
+        items=(
+            ('UP', "폭: 위쪽", "화면 위쪽으로 나란한 루프를 늘리거나 줄인다"),
+            ('DOWN', "폭: 아래쪽", "화면 아래쪽으로 나란한 루프를 늘리거나 줄인다"),
+            ('LENGTH', "길이", "루프를 따라가는 엣지 수를 줄이거나(-) 되돌린다(+)"),
+            ('RING', "링", "루프 대신 링(나란히 쌓인 엣지 한 줄)으로 바꾸거나 되돌린다"),
+            ('RESET', "초기화", "폭과 길이를 처음 클릭한 상태(루프 전체)로 되돌린다"),
+        ),
+        default='UP',
+    )
+    delta: IntProperty(name="Delta", default=1, min=-ADJUST_STEP_MAX, max=ADJUST_STEP_MAX)
+
+    @classmethod
+    def poll(cls, context):
+        return (context.mode == 'EDIT_MESH' and state.adjust is not None
+                and not face_only_mode(context))
+
+    def execute(self, context):
+        adj = state.adjust
+        if not adjust_valid(context):
+            state.reset_adjust()
+            self.report({'WARNING'}, "선택이 바뀌었습니다. Alt+클릭으로 루프를 다시 선택하세요")
+            redraw_3d(context)
+            return {'CANCELLED'}
+
+        p = SimpleNamespace(**adj['params'])
+        t, d = self.target, self.delta
+        if t == 'UP':
+            p.steps_up = min(max(p.steps_up + d, 0), ADJUST_STEP_MAX)
+        elif t == 'DOWN':
+            p.steps_down = min(max(p.steps_down + d, 0), ADJUST_STEP_MAX)
+        elif t == 'LENGTH':
+            lowest = max(ADJUST_LENGTH_MIN, -(adj['total'] - 1)) if adj['total'] else 0
+            p.length_adjust = min(max(p.length_adjust + d, lowest), 0)
+        elif t == 'RING':
+            p.use_ring = not p.use_ring
+        else:
+            p.steps_up = p.steps_down = p.length_adjust = 0
+        if p.use_ring and t != 'RING':
+            p.use_ring = False        # 링 상태에서 폭/길이를 만지면 루프로 돌아와서 적용한다
+
+        ob = context.edit_object
+        restore_selection([ob], adj['snap'])
+        status, msg = run_selection(context, p)
+        if msg:
+            self.report({'WARNING'}, msg)
+        redraw_3d(context)
+        return {status}
+
+
+class MESH_OT_mirror_loop_panel(bpy.types.Operator):
+    """오른쪽 사이드바(N)의 Mirror Loop 탭을 열고 닫는다. 열어 둔 동안은 휠을 돌리거나 다른 작업을 해도 닫히지 않는다"""
+    bl_idname = "mesh.mirror_loop_panel"
+    bl_label = "Mirror Loop Panel"
+
+    CATEGORY = "Mirror Loop"
+
+    @classmethod
+    def poll(cls, context):
+        return (context.mode == 'EDIT_MESH' and context.area is not None
+                and context.area.type == 'VIEW_3D')
+
+    def execute(self, context):
+        space = context.space_data
+        region = next((r for r in context.area.regions if r.type == 'UI'), None)
+        if space is None or space.type != 'VIEW_3D':
+            return {'CANCELLED'}
+        showing = space.show_region_ui
+        if showing and region is not None and region.active_panel_category == self.CATEGORY:
+            space.show_region_ui = False            # 이미 보이고 있으면 닫는다
+            return {'FINISHED'}
+        space.show_region_ui = True
+        if region is not None:
+            try:
+                region.active_panel_category = self.CATEGORY     # 이 탭을 앞으로 가져온다
+            except (TypeError, ValueError):
+                pass                                             # 탭이 아직 그려지기 전이면 사이드바만 연다
+        context.area.tag_redraw()
         return {'FINISHED'}
 
 
@@ -329,6 +464,11 @@ KEYMAPS = (
      "선택한 루프는 해제, 아니면 추가"),
 
     # Alt+휠: 위·아래 동시 / Ctrl+휠: 한 방향
+    # 고정 패널: 사이드바(N)의 Mirror Loop 탭을 열고 닫는다. 임시 키 Alt+1, 환경설정에서 바꾼다.
+    (MESH_OT_mirror_loop_panel.bl_idname, 'ONE', 'PRESS', {'alt': True}, {},
+     "고정 패널 열기/닫기",
+     "사이드바(N)의 Mirror Loop 탭: 폭·길이·링을 +/- 로 조절, 열어 두면 닫히지 않음"),
+
     (MESH_OT_mirror_loop_step.bl_idname, 'WHEELUPMOUSE', 'PRESS',
      {'alt': True}, {'direction': 1, 'both_sides': True},
      "위·아래 동시 확장 · 휠 업",
@@ -350,4 +490,6 @@ KEYMAPS = (
 classes = (
     MESH_OT_mirror_loop_select,
     MESH_OT_mirror_loop_step,
+    MESH_OT_mirror_loop_adjust,
+    MESH_OT_mirror_loop_panel,
 )

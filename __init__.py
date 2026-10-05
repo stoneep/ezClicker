@@ -7,7 +7,8 @@ Mirror Loop Select
   state.py       모듈 간 공유 상태 (휠 확장 상태, 사이 선택 앵커)
   common.py      엣지/면 공통 유틸
   settings.py    확장 단계 설정 (PropertyGroup)
-  ui.py          헤더 버튼, 우클릭 메뉴, 팝업 본문(기능 on/off + 현재 단축키), 단계 전환 오퍼레이터
+  ui.py          헤더 버튼, 우클릭 메뉴, 팝업 본문(기능 on/off + 현재 단축키), 단계 전환 오퍼레이터,
+                 사이드바 고정 패널(폭/길이/링 +/- 조절)
   prefs.py       애드온 환경설정: 단축키 목록 (on/off, 키 변경, 한 줄 설명), 단축키 표시 문자열
 
   edge_core.py   [엣지] 루프 걷기, 다이헤드럴 보조 점수, 미러 반대편 루프 찾기
@@ -32,9 +33,9 @@ Mirror Loop Select
 bl_info = {
     "name": "Mirror Loop Select",
     "author": "류우",
-    "version": (0, 10, 0),
+    "version": (0, 11, 0),
     "blender": (4, 0, 0),
-    "location": "3D Viewport > Edit Mode > Alt + 클릭 = 루프 선택 / Ctrl + Alt + 클릭 = 시작 루프와 클릭한 루프 사이 전부 선택(버텍스·엣지·면) / Shift + Alt + 클릭 = 사이의 루프만 선택 / Alt + 더블클릭 = 같은 모양의 면 전부 선택(Shift+G > 모양) / Ctrl + Shift + Alt + 클릭 = 루프 선택 추가·해제 / (루프 선택 후) Alt + 휠 = 위·아래 동시 확장, Ctrl + 휠 = 한 방향 확장 / 헤더 또는 우클릭 메뉴 = 확장 단계(끔·1단계·2단계) 전환",
+    "location": "3D Viewport > Edit Mode > Alt + 클릭 = 루프 선택 / Ctrl + Alt + 클릭 = 시작 루프와 클릭한 루프 사이 전부 선택(버텍스·엣지·면) / Shift + Alt + 클릭 = 사이의 루프만 선택 / Alt + 더블클릭 = 같은 모양의 면 전부 선택(Shift+G > 모양) / Ctrl + Shift + Alt + 클릭 = 루프 선택 추가·해제 / (루프 선택 후) Alt + 휠 = 위·아래 동시 확장, Ctrl + 휠 = 한 방향 확장 / Alt + 1 = 사이드바 Mirror Loop 고정 패널 열기·닫기(폭·길이·링 조절) / 헤더 또는 우클릭 메뉴 = 확장 단계(끔·1단계·2단계) 전환",
     "description": "극점/삼각형에서 멈추지 않고 루프를 끝까지 선택 + 미러 축에서 끊긴 반대편 루프까지 선택 + Alt+휠로 위/아래 루프 확장/축소 + 루프와 루프 사이 전부(사이의 면까지) 선택 + 확장 단계 전환",
     "category": "Mesh",
 }

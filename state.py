@@ -8,12 +8,16 @@ state.py — 모듈 사이에서 공유하는 런타임 상태.
            None 이면 휠 오퍼레이터의 poll 이 실패해서 휠은 Blender 기본 동작으로 넘어간다.
   anchor : 마지막으로 선택한 루프(시작 루프).
            Ctrl+Alt+클릭(사이 선택)이 이걸 기준으로 사이를 채운다.
+  adjust : 마지막 루프 선택을 고정 패널(사이드바)에서 계속 조절하기 위한 상태. (edge_ops.run_selection 이 채운다)
+           {'ob', 'params'(선택을 다시 계산할 값들), 'snap'(클릭 전 선택), 'counts', 'core'(기준 루프 엣지),
+            'up', 'down'(실제로 늘어난 폭), 'keep', 'total'(길이)}
   keymap_items : __init__.register() 가 등록한 단축키 목록. 환경설정(prefs)이 이걸 보고 그린다.
            각 항목은 {'idname', 'kmi', 'km_name', 'title', 'desc'} 딕셔너리.
 """
 
 wheel = None
 anchor = None
+adjust = None
 keymap_items = []
 
 
@@ -36,7 +40,18 @@ def set_anchor(ob_name, seed_index, counts, selected=True, loop=None):
               'loop': sorted(loop) if loop else None}
 
 
+def set_adjust(adj):
+    global adjust
+    adjust = adj
+
+
+def reset_adjust():
+    global adjust
+    adjust = None
+
+
 def reset_all():
-    global wheel, anchor
+    global wheel, anchor, adjust
     wheel = None
     anchor = None
+    adjust = None

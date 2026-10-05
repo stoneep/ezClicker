@@ -8,6 +8,8 @@ common.py — 엣지/면 양쪽이 함께 쓰는 공통 유틸.
 import bmesh
 from bpy_extras import view3d_utils
 
+from . import state
+
 
 def redraw_3d(context):
     """모든 3D 뷰를 다시 그리게 한다. (표시용 오버레이가 바뀌었을 때)"""
@@ -130,3 +132,17 @@ def restore_selection(objs, snap):
             bm.faces[i].select_set(True)
         bm.select_flush_mode()
         bmesh.update_edit_mesh(ob.data, loop_triangles=False, destructive=False)
+
+
+def adjust_valid(context):
+    """고정 패널이 조절할 수 있는 상태인지: 마지막 루프 선택의 메시와 선택이 그대로인지 가볍게 확인한다."""
+    adj = state.adjust
+    ob = context.edit_object
+    if adj is None or ob is None or context.mode != 'EDIT_MESH' or ob.name != adj['ob']:
+        return False
+    bm = bmesh.from_edit_mesh(ob.data)
+    if mesh_counts(bm) != adj['counts']:
+        return False
+    bm.edges.ensure_lookup_table()
+    edges = bm.edges
+    return all(edges[i].select for i in adj['core'])

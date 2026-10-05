@@ -5,6 +5,8 @@ ui.py — 확장 단계 전환 UI와 기능 메뉴 (3D 뷰포트 헤더 버튼 /
   - 헤더 버튼         : 팝오버 패널 (VIEW3D_PT_mirror_loop_select)
   - 우클릭 메뉴 맨 아래 : 서브메뉴 (MESH_MT_mirror_loop_level)
   - 팝업 단축키        : 같은 패널을 마우스 위치에 띄운다 (wm.call_panel, 열린 채로 여러 항목을 바꿀 수 있다)
+또 하나, 사이드바(N)의 'Mirror Loop' 탭(VIEW3D_PT_mirror_loop_adjust)은 마지막 루프 선택의 폭/길이/링을 +/- 로 고치는
+고정 패널이다. 팝업과 달리 마우스가 벗어나도, 휠을 돌려도 닫히지 않는다. (열고 닫기: mesh.mirror_loop_panel, 임시 키 Alt+1)
 
 본문 구성
   1) 확장 단계 버튼
@@ -19,6 +21,7 @@ import bpy
 from bpy.props import EnumProperty
 
 from . import prefs, state
+from .common import adjust_valid, face_only_mode
 from .settings import LEVEL_ICON, LEVEL_ITEMS, LEVEL_SHORT, get_settings
 
 
@@ -56,20 +59,23 @@ class MESH_OT_mirror_loop_level(bpy.types.Operator):
 
 
 POPUP_IDNAME = "wm.call_panel"      # 팝업을 여는 키맵 항목의 오퍼레이터
+PANEL_IDNAME = "mesh.mirror_loop_panel"      # 고정 패널(사이드바 탭)을 여닫는 키맵 항목의 오퍼레이터
+ADJUST_IDNAME = "mesh.mirror_loop_adjust"    # 고정 패널의 +/- 버튼 오퍼레이터
+KEY_ROW_IDNAMES = (POPUP_IDNAME, PANEL_IDNAME)     # 기능 목록 대신 위쪽 '키 입력 행'으로 따로 그리는 항목
 
 
-def popup_entry():
-    return next((e for e in state.keymap_items if e['idname'] == POPUP_IDNAME), None)
+def popup_entry(idname=POPUP_IDNAME):
+    return next((e for e in state.keymap_items if e['idname'] == idname), None)
 
 
-def draw_popup_key(layout, editable):
-    """팝업을 여는 단축키. editable 이면 키 버튼을 눌러 바로 바꾼다. 다른 단축키와 겹치면 경고한다."""
-    entry = popup_entry()
+def draw_popup_key(layout, editable, idname=POPUP_IDNAME, label="팝업 단축키"):
+    """팝업(또는 고정 패널)을 여는 단축키. editable 이면 키 버튼을 눌러 바로 바꾼다. 다른 단축키와 겹치면 경고한다."""
+    entry = popup_entry(idname)
     if entry is None:
         return
     kmi = prefs.find_user_kmi(entry)
     row = layout.row(align=True)
-    row.label(text="팝업 단축키")
+    row.label(text=label)
     if kmi is None:
         row.label(text="키맵에서 찾을 수 없음", icon='ERROR')
         return
@@ -87,7 +93,7 @@ def draw_popup_key(layout, editable):
 def draw_features(layout):
     """기능별 켜기/끄기 체크박스 + 현재 단축키. (바꾼 키도 반영된다.) 팝업 키는 따로 그린다."""
     for entry in state.keymap_items:
-        if entry['idname'] == POPUP_IDNAME:
+        if entry['idname'] in KEY_ROW_IDNAMES:
             continue
         kmi = prefs.find_user_kmi(entry)
         row = layout.row(align=True)
@@ -109,6 +115,7 @@ def draw_panel_body(layout, s, editable=True):
               (우클릭 서브메뉴는 키 입력을 받는 버튼이 어울리지 않아 글자로만 보여준다.)
     """
     draw_popup_key(layout, editable)
+    draw_popup_key(layout, editable, PANEL_IDNAME, "고정 패널 단축키")
     layout.separator()
 
     layout.label(text="확장 단계")
@@ -131,6 +138,85 @@ def draw_panel_body(layout, s, editable=True):
     layout.separator()
     layout.operator("mesh.mirror_face_similar", text="같은 모양 면 선택 (선택한 면 기준)", icon='FACESEL')
     layout.operator("preferences.addon_show", text="환경설정 (단축키 변경)", icon='PREFERENCES').module = __package__
+
+
+# ---------------------------------------------------------------------------
+# 고정 패널: 사이드바(N) > Mirror Loop 탭
+# ---------------------------------------------------------------------------
+
+def adjust_row(layout, text, target, value_text, can_minus, can_plus, step=1):
+    """'이름   [-]  값  [+]' 한 줄. 숫자는 가운데 글자로 보여주고, 버튼은 mesh.mirror_loop_adjust 를 부른다."""
+    col = layout.column(align=True)
+    col.label(text=text)
+    row = col.row(align=True)
+    minus = row.row(align=True)
+    minus.enabled = can_minus
+    op = minus.operator(ADJUST_IDNAME, text="", icon='REMOVE')
+    op.target, op.delta = target, -step
+    mid = row.row(align=True)
+    mid.alignment = 'CENTER'
+    mid.label(text=value_text)
+    plus = row.row(align=True)
+    plus.enabled = can_plus
+    op = plus.operator(ADJUST_IDNAME, text="", icon='ADD')
+    op.target, op.delta = target, step
+
+
+def draw_adjust(layout, context):
+    """고정 패널 본문. state.adjust (마지막 루프 선택)의 값을 보여주고 +/- 로 바꾼다."""
+    entry = popup_entry(PANEL_IDNAME)
+    kmi = prefs.find_user_kmi(entry) if entry else None
+
+    if face_only_mode(context):
+        layout.label(text="면 모드에서는 쓸 수 없습니다", icon='INFO')
+        layout.label(text="엣지(또는 버텍스) 모드로 바꾸세요")
+    elif not adjust_valid(context):
+        layout.label(text="Alt+클릭으로 루프를 선택하세요", icon='INFO')
+        layout.label(text="선택을 바꾸면 이 패널은 쉬었다가")
+        layout.label(text="다음 루프 선택부터 다시 동작합니다")
+    else:
+        adj = state.adjust
+        p = adj['params']
+        ring = p['use_ring']
+
+        layout.operator(ADJUST_IDNAME, text="링 (Ring)", icon='MOD_ARRAY', depress=ring).target = 'RING'
+
+        col = layout.column()
+        col.enabled = not ring        # 링은 폭/길이를 쓰지 않는다
+        adjust_row(col, "폭: 위쪽 루프", 'UP', str(adj['up']),
+                   adj['up'] > 0, adj['up'] < 50)
+        adjust_row(col, "폭: 아래쪽 루프", 'DOWN', str(adj['down']),
+                   adj['down'] > 0, adj['down'] < 50)
+        total = adj['total']
+        keep = adj['keep'] or total
+        adjust_row(col, "길이: 엣지", 'LENGTH', f"{keep} / {total}" if keep != total else f"전체 ({total})",
+                   keep > 1, keep < total)
+        col.operator(ADJUST_IDNAME, text="폭·길이 초기화", icon='LOOP_BACK').target = 'RESET'
+
+    layout.separator()
+    if kmi is not None:
+        row = layout.row(align=True)
+        row.label(text="열기/닫기")
+        row.label(text=prefs.key_text(kmi))
+        layout.prop(kmi, "type", text="", full_event=True)
+        conflicts = prefs.find_conflicts(kmi)
+        if conflicts:
+            layout.label(text="겹침: " + ", ".join(conflicts), icon='ERROR')
+
+
+class VIEW3D_PT_mirror_loop_adjust(bpy.types.Panel):
+    bl_label = "Mirror Loop"
+    bl_idname = "VIEW3D_PT_mirror_loop_adjust"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = "Mirror Loop"
+
+    @classmethod
+    def poll(cls, context):
+        return context.mode == 'EDIT_MESH'
+
+    def draw(self, context):
+        draw_adjust(self.layout, context)
 
 
 class MESH_MT_mirror_loop_level(bpy.types.Menu):
@@ -211,4 +297,5 @@ classes = (
     MESH_OT_mirror_loop_level,
     MESH_MT_mirror_loop_level,
     VIEW3D_PT_mirror_loop_select,
+    VIEW3D_PT_mirror_loop_adjust,
 )
