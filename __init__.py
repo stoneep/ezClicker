@@ -80,9 +80,12 @@ def register():
                 for name, val in props.items():
                     setattr(kmi.properties, name, val)
                 addon_keymaps.append((km, kmi))
+                if title is None:        # 내부용 키맵(메뉴 '대기 중 클릭' 등)은 목록에 보이지 않는다
+                    continue
                 state.keymap_items.append({
                     'idname': idname, 'kmi': kmi, 'km_name': km.name,
-                    'title': title, 'desc': desc,
+                    'title': title, 'desc': desc, 'props': dict(props),
+                    'click': key in ('LEFTMOUSE', 'RIGHTMOUSE', 'MIDDLEMOUSE'),
                 })
 
 
