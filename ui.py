@@ -55,9 +55,40 @@ class MESH_OT_mirror_loop_level(bpy.types.Operator):
         return {'FINISHED'}
 
 
+POPUP_IDNAME = "wm.call_panel"      # 팝업을 여는 키맵 항목의 오퍼레이터
+
+
+def popup_entry():
+    return next((e for e in state.keymap_items if e['idname'] == POPUP_IDNAME), None)
+
+
+def draw_popup_key(layout, editable):
+    """팝업을 여는 단축키. editable 이면 키 버튼을 눌러 바로 바꾼다. 다른 단축키와 겹치면 경고한다."""
+    entry = popup_entry()
+    if entry is None:
+        return
+    kmi = prefs.find_user_kmi(entry)
+    row = layout.row(align=True)
+    row.label(text="팝업 단축키")
+    if kmi is None:
+        row.label(text="키맵에서 찾을 수 없음", icon='ERROR')
+        return
+    if editable:
+        row.prop(kmi, "type", text="", full_event=True)
+        if kmi.is_user_modified:
+            row.operator("preferences.keyitem_restore", text="", icon='BACK').item_id = kmi.id
+    else:
+        row.label(text=prefs.key_text(kmi))
+    conflicts = prefs.find_conflicts(kmi)
+    if conflicts:
+        layout.label(text="겹침: " + ", ".join(conflicts), icon='ERROR')
+
+
 def draw_features(layout):
-    """기능별 켜기/끄기 체크박스 + 현재 단축키. (바꾼 키도 반영된다.)"""
+    """기능별 켜기/끄기 체크박스 + 현재 단축키. (바꾼 키도 반영된다.) 팝업 키는 따로 그린다."""
     for entry in state.keymap_items:
+        if entry['idname'] == POPUP_IDNAME:
+            continue
         kmi = prefs.find_user_kmi(entry)
         row = layout.row(align=True)
         if kmi is None:
@@ -71,8 +102,15 @@ def draw_features(layout):
         key.label(text=prefs.key_text(kmi))
 
 
-def draw_panel_body(layout, s):
-    """메뉴, 패널, 팝업이 같이 쓰는 본문."""
+def draw_panel_body(layout, s, editable=True):
+    """
+    메뉴, 패널, 팝업이 같이 쓰는 본문.
+    editable: 팝업 단축키를 키 버튼으로 바로 바꿀 수 있게 할지.
+              (우클릭 서브메뉴는 키 입력을 받는 버튼이 어울리지 않아 글자로만 보여준다.)
+    """
+    draw_popup_key(layout, editable)
+    layout.separator()
+
     layout.label(text="확장 단계")
     for ident, name, _desc, icon, _num in LEVEL_ITEMS:
         op = layout.operator(MESH_OT_mirror_loop_level.bl_idname, text=name, icon=icon,
@@ -85,7 +123,7 @@ def draw_panel_body(layout, s):
         for draw in settings_drawers:
             draw(layout, s)
 
-    if state.keymap_items:
+    if len(state.keymap_items) > 1:
         layout.separator()
         layout.label(text="기능 켜기/끄기 · 단축키")
         draw_features(layout)
@@ -102,7 +140,7 @@ class MESH_MT_mirror_loop_level(bpy.types.Menu):
     def draw(self, context):
         s = get_settings(context)
         if s is not None:
-            draw_panel_body(self.layout, s)
+            draw_panel_body(self.layout, s, editable=False)
 
 
 class VIEW3D_PT_mirror_loop_select(bpy.types.Panel):

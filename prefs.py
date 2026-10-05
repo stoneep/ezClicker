@@ -64,6 +64,37 @@ def key_text(kmi):
     return text
 
 
+# 겹침을 확인할 키맵. 3D 뷰 편집 모드에서 같은 키를 먼저 가져갈 수 있는 곳들이다.
+_CONFLICT_KEYMAPS = ("Mesh", "3D View", "3D View Generic", "Window", "Screen", "Frames")
+
+
+def find_conflicts(kmi, limit=3):
+    """
+    kmi 와 같은 키(종류, 값, 수식키)를 쓰는 다른 활성 단축키 이름 리스트 (최대 limit개).
+    다른 애드온이나 Blender 기본 단축키와 겹치면 먼저 처리되는 쪽만 동작하므로, 바꿀 때 경고하는 데 쓴다.
+    """
+    if kmi is None or kmi.type == 'NONE':
+        return []
+    kc = bpy.context.window_manager.keyconfigs.user
+    if kc is None:
+        return []
+    out = []
+    for name in _CONFLICT_KEYMAPS:
+        km = kc.keymaps.get(name)
+        if km is None:
+            continue
+        for k in km.keymap_items:
+            if k.id == kmi.id or not k.active or k.type != kmi.type or k.value != kmi.value:
+                continue
+            same_mods = (k.ctrl == kmi.ctrl and k.shift == kmi.shift and k.alt == kmi.alt
+                         and k.oskey == kmi.oskey)
+            if (same_mods or k.any) and k.key_modifier == kmi.key_modifier:
+                out.append(k.name or k.idname)
+                if len(out) >= limit:
+                    return out
+    return out
+
+
 class MLS_Preferences(bpy.types.AddonPreferences):
     bl_idname = __package__
 
