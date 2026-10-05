@@ -130,13 +130,18 @@ class MESH_OT_mirror_loop_between(bpy.types.Operator):
         anchor = state.anchor
         valid = (anchor is not None and anchor['ob'] == ob.name and anchor['counts'] == counts
                  and anchor['seed'] < len(bm.edges) and not bm.edges[anchor['seed']].hide)
+        # 선택이 하나도 없으면(Alt+A 로 지운 뒤 등) 이전 시작 루프는 버리고 새로 시작한다.
+        # (이전 루프가 남아 있으면 첫 클릭이 엉뚱한 루프와의 '사이'로 처리되어 경고가 뜨거나 먼 곳이 선택된다.)
+        # 단, 면 모드의 첫 클릭처럼 아무것도 선택하지 않고 '대기'만 하는 시작 루프는 선택이 없어도 유효하다.
+        if valid and anchor.get('selected', True) and not any(snap[ob]):
+            valid = False
 
         # 면 모드에서는 엣지를 고르는 게 의미가 없다. 사이의 면만 고르고, 면을 못 찾으면 아무것도 고르지 않는다.
         face_only = face_only_mode(context)
         selected = set() if face_only else target
         faces = set()
         if not valid:
-            self.report({'INFO'}, "먼저 시작 루프를 지정해야 합니다. 지금 클릭한 루프를 시작 루프로 지정했습니다. 다른 루프를 한 번 더 클릭하세요.")
+            self.report({'INFO'}, "시작 루프를 지정했습니다. 같은 방향의 다른 루프를 클릭하면 그 사이가 선택됩니다.")
         else:
             # 3) 시작 루프에서 걸어가며 끝 루프와 만나는 곳까지 채운다.
             loops, steps = find_between(
@@ -166,7 +171,7 @@ class MESH_OT_mirror_loop_between(bpy.types.Operator):
         bmesh.update_edit_mesh(ob.data, loop_triangles=False, destructive=False)
 
         # 끝 루프를 새 앵커로 -> 이어서 Ctrl+Alt+클릭(또는 Shift+Alt+클릭)하면 B~C 구간이 선택된다.
-        state.set_anchor(ob.name, seed_b.index, counts)
+        state.set_anchor(ob.name, seed_b.index, counts, selected=bool(selected or faces))
         return {'FINISHED'}
 
 
