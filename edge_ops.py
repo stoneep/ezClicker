@@ -59,12 +59,12 @@ class MESH_OT_mirror_loop_select(bpy.types.Operator):
     steps_up: IntProperty(
         name="위쪽 루프 (+/-)",
         description="클릭한 루프에서 화면 위쪽으로 루프를 몇 줄 더 선택할지",
-        default=0, min=0, max=100000, options={'SKIP_SAVE'},   # soft_max 를 따로 두지 않아야 +/- 화살표도 끝까지 올라간다
+        default=0, min=0, max=50, options={'SKIP_SAVE'},   # soft_max 를 따로 두지 않아야 +/- 화살표도 끝까지(50) 올라간다
     )
     steps_down: IntProperty(
         name="아래쪽 루프 (+/-)",
         description="클릭한 루프에서 화면 아래쪽으로 루프를 몇 줄 더 선택할지",
-        default=0, min=0, max=100000, options={'SKIP_SAVE'},   # soft_max 를 따로 두지 않아야 +/- 화살표도 끝까지 올라간다
+        default=0, min=0, max=50, options={'SKIP_SAVE'},   # soft_max 를 따로 두지 않아야 +/- 화살표도 끝까지(50) 올라간다
     )
     # 패널에서 값을 바꾸면 Blender 가 실행 취소 후 execute 를 다시 부른다. 그래서 invoke 에서 정한 것을 기억해 둔다.
     seed_object: StringProperty(options={'HIDDEN', 'SKIP_SAVE'})
