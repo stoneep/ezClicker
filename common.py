@@ -9,6 +9,14 @@ import bmesh
 from bpy_extras import view3d_utils
 
 
+def face_only_mode(context):
+    """선택 모드가 '면' 하나뿐이면 True. (버텍스·엣지 모드가 같이 켜져 있으면 False)
+
+    면 전용 모드에서는 엣지만 선택하는 동작이 의미가 없다. 엣지 선택 상태가 화면에 보이지 않은 채 남기 때문이다.
+    """
+    return tuple(context.tool_settings.mesh_select_mode) == (False, False, True)
+
+
 def get_mirror_axes(obj):
     """편집 모드 Symmetry(use_mirror_x/y/z)와 Mirror 모디파이어의 축을 모두 모은다."""
     me = obj.data

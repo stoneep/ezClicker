@@ -21,7 +21,7 @@ from bpy.props import BoolProperty, FloatProperty, IntProperty, StringProperty
 from mathutils import Vector
 
 from . import state
-from .common import (ensure_tables, get_mirror_axes, mesh_counts, pick_seed,
+from .common import (ensure_tables, face_only_mode, get_mirror_axes, mesh_counts, pick_seed,
                      restore_selection, snapshot_selection)
 from .edge_core import find_mirror_edges, walk_loop
 from .edge_range import (apply_range, build_offset, new_wheel_state, state_valid,
@@ -76,7 +76,9 @@ class MESH_OT_mirror_loop_select(bpy.types.Operator):
     @classmethod
     def poll(cls, context):
         # 끔 단계에서는 poll 이 실패해 Blender 기본 Alt+클릭(루프 선택)이 그대로 동작한다.
-        return context.mode == 'EDIT_MESH' and extension_enabled(context)
+        # 면 모드에서도 마찬가지다. (Blender 기본 Alt+클릭은 면 루프를 고른다. 우리 연산은 엣지를 고르므로 맞지 않는다.)
+        return (context.mode == 'EDIT_MESH' and extension_enabled(context)
+                and not face_only_mode(context))
 
     def draw(self, context):
         layout = self.layout
@@ -233,7 +235,7 @@ class MESH_OT_mirror_loop_step(bpy.types.Operator):
     def poll(cls, context):
         ob = context.edit_object
         st = state.wheel
-        return (context.mode == 'EDIT_MESH' and st is not None
+        return (context.mode == 'EDIT_MESH' and st is not None and not face_only_mode(context)
                 and ob is not None and ob.name == st['ob'])
 
     def invoke(self, context, event):

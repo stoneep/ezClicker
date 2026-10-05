@@ -35,7 +35,7 @@ from mathutils import Vector
 from mathutils.bvhtree import BVHTree
 
 from . import state
-from .common import (ensure_tables, get_mirror_axes, mesh_counts, pick_seed,
+from .common import (ensure_tables, face_only_mode, get_mirror_axes, mesh_counts, pick_seed,
                      restore_selection, snapshot_selection)
 from .edge_core import find_mirror_edges, walk_loop
 from .edge_range import find_between
@@ -131,10 +131,12 @@ class MESH_OT_mirror_loop_between(bpy.types.Operator):
         valid = (anchor is not None and anchor['ob'] == ob.name and anchor['counts'] == counts
                  and anchor['seed'] < len(bm.edges) and not bm.edges[anchor['seed']].hide)
 
-        selected = target
+        # 면 모드에서는 엣지를 고르는 게 의미가 없다. 사이의 면만 고르고, 면을 못 찾으면 아무것도 고르지 않는다.
+        face_only = face_only_mode(context)
+        selected = set() if face_only else target
         faces = set()
         if not valid:
-            self.report({'INFO'}, "먼저 Alt+클릭으로 시작 루프를 선택하세요. 지금 클릭한 루프를 시작 루프로 지정했습니다.")
+            self.report({'INFO'}, "먼저 시작 루프를 지정해야 합니다. 지금 클릭한 루프를 시작 루프로 지정했습니다. 다른 루프를 한 번 더 클릭하세요.")
         else:
             # 3) 시작 루프에서 걸어가며 끝 루프와 만나는 곳까지 채운다.
             loops, steps = find_between(
@@ -142,12 +144,14 @@ class MESH_OT_mirror_loop_between(bpy.types.Operator):
                 cos_limit, dih, self.max_steps)
             if loops is None:
                 self.report({'WARNING'},
-                            "두 루프 사이를 잇는 경로를 찾지 못했습니다 (삼각형/N-gon 으로 끊기거나 다른 덩어리일 수 있음). 클릭한 루프만 선택합니다.")
+                            "두 루프 사이를 잇는 경로를 찾지 못했습니다 (삼각형/N-gon 으로 끊기거나 다른 덩어리일 수 있음). %s"
+                            % ("선택하지 않습니다." if face_only else "클릭한 루프만 선택합니다."))
             else:
-                selected = set(target)
+                selected = set() if face_only else set(target)
                 for s in loops:
-                    selected |= s
-                if self.select_faces:
+                    if not face_only:
+                        selected |= s
+                if self.select_faces or face_only:
                     faces = strip_faces(bm, loops)
                 if faces:
                     self.report({'INFO'}, "루프 %d개, 면 %d개 선택" % (steps + 1, len(faces)))
