@@ -1,15 +1,24 @@
 """
-ui.py — 확장 단계 전환 UI (3D 뷰포트 헤더 버튼 / 우클릭 메뉴 / 팝오버 패널).
+ui.py — 확장 단계 전환 UI와 기능 메뉴 (3D 뷰포트 헤더 버튼 / 우클릭 메뉴 / 팝업).
 
-패널은 '확장 단계 버튼' 아래에, 각 기능 모듈(edge_ops, face_ops)이 내놓은
-draw_settings(layout, settings) 를 순서대로 이어서 그린다.
-(어떤 모듈이 그릴지는 __init__.register() 가 settings_drawers 에 채워 넣는다.
- 그래서 이 파일은 엣지/면 모듈을 직접 가져오지 않는다.)
+세 곳이 같은 본문(draw_panel_body)을 쓴다. 고칠 때는 여기 한 곳만 고치면 된다.
+  - 헤더 버튼         : 팝오버 패널 (VIEW3D_PT_mirror_loop_select)
+  - 우클릭 메뉴 맨 아래 : 서브메뉴 (MESH_MT_mirror_loop_level)
+  - 팝업 단축키        : 같은 패널을 마우스 위치에 띄운다 (wm.call_panel, 열린 채로 여러 항목을 바꿀 수 있다)
+
+본문 구성
+  1) 확장 단계 버튼
+  2) 옵션 : 각 기능 모듈(edge_ops, face_ops)이 내놓은 draw_settings(layout, settings) 를 순서대로 이어서 그린다.
+            (어떤 모듈이 그릴지는 __init__.register() 가 settings_drawers 에 채워 넣는다.
+             그래서 이 파일은 엣지/면 모듈을 직접 가져오지 않는다.)
+  3) 기능 켜기/끄기 + 현재 단축키 : state.keymap_items 의 사용자 키맵 항목을 그린다.
+  4) 도구 / 환경설정 바로가기
 """
 
 import bpy
 from bpy.props import EnumProperty
 
+from . import prefs, state
 from .settings import LEVEL_ICON, LEVEL_ITEMS, LEVEL_SHORT, get_settings
 
 
@@ -46,20 +55,48 @@ class MESH_OT_mirror_loop_level(bpy.types.Operator):
         return {'FINISHED'}
 
 
+def draw_features(layout):
+    """기능별 켜기/끄기 체크박스 + 현재 단축키. (바꾼 키도 반영된다.)"""
+    for entry in state.keymap_items:
+        kmi = prefs.find_user_kmi(entry)
+        row = layout.row(align=True)
+        if kmi is None:
+            row.label(text=entry['title'], icon='ERROR')
+            continue
+        split = row.split(factor=0.66, align=True)
+        split.prop(kmi, "active", text=entry['title'])
+        key = split.row(align=True)
+        key.active = kmi.active
+        key.alignment = 'RIGHT'
+        key.label(text=prefs.key_text(kmi))
+
+
 def draw_panel_body(layout, s):
-    """확장 단계 버튼 + 각 기능 모듈의 설정. 메뉴와 패널이 같이 쓴다."""
+    """메뉴, 패널, 팝업이 같이 쓰는 본문."""
+    layout.label(text="확장 단계")
     for ident, name, _desc, icon, _num in LEVEL_ITEMS:
         op = layout.operator(MESH_OT_mirror_loop_level.bl_idname, text=name, icon=icon,
                              depress=(s.level == ident))
         op.level = ident
+
     if settings_drawers:
         layout.separator()
+        layout.label(text="옵션")
         for draw in settings_drawers:
             draw(layout, s)
 
+    if state.keymap_items:
+        layout.separator()
+        layout.label(text="기능 켜기/끄기 · 단축키")
+        draw_features(layout)
+
+    layout.separator()
+    layout.operator("mesh.mirror_face_similar", text="같은 모양 면 선택 (선택한 면 기준)", icon='FACESEL')
+    layout.operator("preferences.addon_show", text="환경설정 (단축키 변경)", icon='PREFERENCES').module = __package__
+
 
 class MESH_MT_mirror_loop_level(bpy.types.Menu):
-    bl_label = "루프 확장 단계"
+    bl_label = "Mirror Loop Select"
     bl_idname = "MESH_MT_mirror_loop_level"
 
     def draw(self, context):
@@ -92,7 +129,7 @@ def draw_header_button(self, context):
 
 
 def draw_context_menu(self, context):
-    """편집 모드 우클릭 메뉴 맨 아래에 단계 서브메뉴를 붙인다."""
+    """편집 모드 우클릭 메뉴 맨 아래에 기능 서브메뉴를 붙인다. (현재 확장 단계가 제목에 보인다)"""
     s = get_settings(context)
     if s is None:
         return
@@ -119,9 +156,14 @@ def unregister_hooks():
     bpy.types.VIEW3D_HT_header.remove(draw_header_button)
 
 
-# 확장 단계 순환: 키는 비워 둔다. (환경설정의 단축키 목록이나 Preferences > Keymap > Mesh 에서 지정)
 # (idname, 키, 값, 수식키, 오퍼레이터 속성, 환경설정에 보일 제목, 한 줄 설명)
 KEYMAPS = (
+    # 팝업: 헤더 버튼과 같은 패널을 마우스 위치에 띄운다. 다른 애드온과 키가 겹치면 환경설정에서 바꾼다.
+    ("wm.call_panel", 'Q', 'PRESS', {'alt': True},
+     {'name': 'VIEW3D_PT_mirror_loop_select', 'keep_open': True},
+     "기능 메뉴 열기",
+     "기능 켜기/끄기와 단축키를 한곳에 보여주는 팝업"),
+    # 확장 단계 순환: 키는 비워 둔다. (환경설정의 단축키 목록에서 지정)
     (MESH_OT_mirror_loop_level.bl_idname, 'NONE', 'PRESS', {}, {'level': 'CYCLE'},
      "확장 단계 순환",
      "끔→1단계→2단계 전환, 기본 키 없음"),

@@ -7,8 +7,8 @@ Mirror Loop Select
   state.py       모듈 간 공유 상태 (휠 확장 상태, 사이 선택 앵커)
   common.py      엣지/면 공통 유틸
   settings.py    확장 단계 설정 (PropertyGroup)
-  ui.py          헤더 버튼, 우클릭 메뉴, 팝오버 패널, 단계 전환 오퍼레이터
-  prefs.py       애드온 환경설정: 단축키 목록 (on/off, 키 변경, 한 줄 설명)
+  ui.py          헤더 버튼, 우클릭 메뉴, 팝업 본문(기능 on/off + 현재 단축키), 단계 전환 오퍼레이터
+  prefs.py       애드온 환경설정: 단축키 목록 (on/off, 키 변경, 한 줄 설명), 단축키 표시 문자열
 
   edge_core.py   [엣지] 루프 걷기, 다이헤드럴 보조 점수, 미러 반대편 루프 찾기
   edge_range.py  [엣지] 휠 확장/축소(오프셋 루프), 시작~끝 루프 사이 탐색
@@ -42,20 +42,20 @@ bl_info = {
 if "bpy" in locals():
     import importlib
     from . import (state, common, settings, face_core, face_shape, edge_core, edge_range,
-                   edge_ops, face_ops, ui, prefs)
+                   edge_ops, face_ops, prefs, ui)
     for _m in (state, common, settings, face_core, face_shape, edge_core, edge_range,
-               edge_ops, face_ops, ui, prefs):
+               edge_ops, face_ops, prefs, ui):
         importlib.reload(_m)
 else:
     from . import (state, common, settings, face_core, face_shape, edge_core, edge_range,  # noqa: F401
-                   edge_ops, face_ops, ui, prefs)
+                   edge_ops, face_ops, prefs, ui)
 
 import bpy
 from bpy.props import PointerProperty
 
 
 # 클래스 / 키맵 / 패널 설정을 내놓는 모듈. 등록은 이 순서대로 한다.
-MODULES = (settings, edge_ops, face_ops, ui, prefs)
+MODULES = (settings, edge_ops, face_ops, prefs, ui)
 
 classes = tuple(c for m in MODULES for c in m.classes)
 addon_keymaps = []
