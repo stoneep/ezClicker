@@ -5,7 +5,6 @@ common.py — 엣지/면 양쪽이 함께 쓰는 공통 유틸.
 (엣지 전용은 edge_core.py, 면 전용은 face_core.py)
 """
 
-import bpy
 import bmesh
 from bpy_extras import view3d_utils
 
@@ -113,25 +112,17 @@ def snapshot_selection(objs):
 
 
 def restore_selection(objs, snap):
-    """snapshot_selection 으로 기록한 선택으로 되돌린다.
-
-    편집 중인 오브젝트를 전부 되돌리는 경우 선택 해제는 C 로 구현된 select_all 로 한 번에 한다.
-    (면·엣지·버텍스를 파이썬으로 하나씩 해제하면 메시가 클 때 수백 ms 가 걸린다)
-    """
-    all_objs = set(bpy.context.objects_in_mode_unique_data) if bpy.context is not None else set()
-    fast = bool(objs) and set(objs) >= all_objs
-    if fast:
-        bpy.ops.mesh.select_all(action='DESELECT')
     for ob in objs:
         bm = bmesh.from_edit_mesh(ob.data)
         bm.verts.ensure_lookup_table()
         bm.edges.ensure_lookup_table()
         bm.faces.ensure_lookup_table()
-        if not fast:
-            for seq in (bm.faces, bm.edges, bm.verts):
-                for x in seq:
-                    if x.select:
-                        x.select_set(False)
+        for f in bm.faces:
+            f.select_set(False)
+        for e in bm.edges:
+            e.select_set(False)
+        for v in bm.verts:
+            v.select_set(False)
         vs, es, fs = snap[ob]
         for i in vs:
             bm.verts[i].select_set(True)

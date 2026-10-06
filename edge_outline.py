@@ -44,11 +44,9 @@ def region_outline(bm, seed, walked):
     faces = [f for f in seed.link_faces if not f.hide]
     if len(faces) != 2:
         return None
-    for f in faces:
-        f.normal_update()                # 이 두 면만 갱신: 매끈한 대부분의 클릭에서 메시 전체 법선을 다시 계산하지 않는다
+    bm.normal_update()
     if faces[0].normal.angle(faces[1].normal, 0.0) < SHARP:
         return None
-    bm.normal_update()                   # 날카로운 엣지일 때만 영역을 훑으므로 그때 전체 법선을 최신으로
     islands = [flat_island(f, FLAT) for f in faces]
     if faces[1] in islands[0]:                    # 한 영역이 양쪽을 다 덮는다(접힘 등)
         return None
