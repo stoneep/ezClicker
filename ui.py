@@ -6,7 +6,7 @@ ui.py — 확장 단계 전환 UI와 기능 메뉴 (3D 뷰포트 헤더 버튼 /
   - 우클릭 메뉴 맨 아래 : 서브메뉴 (MESH_MT_mirror_loop_level)
   - 팝업 단축키        : 같은 패널을 마우스 위치에 띄운다 (wm.call_panel, 열린 채로 여러 항목을 바꿀 수 있다)
 또 하나, 사이드바(N)의 'Mirror Loop' 탭(VIEW3D_PT_mirror_loop_adjust)은 마지막 루프 선택의 폭/길이/링을 +/- 로 고치는
-고정 패널이다. 면 모드에서는 Ctrl+Alt+클릭으로 지정한 색 선(시작 루프)을 가운데로 위/아래 면을 고른다. 팝업과 달리 마우스가 벗어나도, 휠을 돌려도 닫히지 않는다. (열고 닫기: mesh.mirror_loop_panel, 임시 키 Alt+1)
+고정 패널이다. 면 모드에서는 Blender 기본 Alt+클릭(면 루프 선택)으로 고른 면 줄의 폭/길이를 조절한다. 팝업과 달리 마우스가 벗어나도, 휠을 돌려도 닫히지 않는다. (열고 닫기: mesh.mirror_loop_panel, 임시 키 Alt+1)
 
 본문 구성
   1) 확장 단계 버튼
@@ -153,26 +153,25 @@ def draw_adjust(layout, context):
     valid = adjust_valid(context)
     mode = adjust_mode()
     if face_only_mode(context) and not (valid and mode == 'FACE'):
-        layout.label(text="Ctrl+Alt+클릭으로 시작 루프를", icon='INFO')
-        layout.label(text="지정하세요 (색 선으로 표시됩니다)")
-        layout.label(text="그 선을 가운데로 위·아래 면을")
-        layout.label(text="이 패널에서 고를 수 있습니다")
+        layout.label(text="Alt+클릭으로 면 루프를 선택하세요", icon='INFO')
+        layout.label(text="(Blender 기본 면 루프 선택)")
+        layout.label(text="고른 면 줄의 폭·길이를")
+        layout.label(text="이 패널에서 조절할 수 있습니다")
     elif not valid:
         layout.label(text="Alt+클릭으로 루프를 선택하세요", icon='INFO')
         layout.label(text="(엣지·버텍스 모드에서 동작)")
         layout.label(text="선택을 바꾸면 이 패널은 쉬었다가")
         layout.label(text="다음 루프 선택부터 다시 동작합니다")
     elif mode == 'FACE':
-        # 면 모드: 색 선(시작 루프)을 가운데로 위/아래 면 줄 수. 숫자칸은 엣지 모드와 같은 설정 값을 쓴다.
+        # 면 모드: 기본 면 루프 선택으로 고른 줄. 폭 = 양옆에 붙일 나란한 줄 수, 길이 = 줄 안에서 남길 면 수.
         adj = state.adjust
         s = get_settings(context)
-        layout.label(text="색 선을 가운데로 면 선택", icon='FACESEL')
+        layout.label(text="면 루프 (Blender 기본 선택 기준)", icon='FACESEL')
         col = layout.column(align=True)
-        col.prop(s, "adjust_up", text="면 줄 수: 위쪽")
-        col.prop(s, "adjust_down", text="면 줄 수: 아래쪽")
-        col.prop(s, "adjust_length", text=f"길이: 엣지 수 (전체 {adj['total']})")
-        layout.operator(FACE_ADJUST_IDNAME, text="면 선택 초기화", icon='LOOP_BACK').target = 'RESET'
-        layout.label(text="Esc = 시작 루프 취소")
+        col.prop(s, "adjust_up", text="폭: 위쪽 줄 수")
+        col.prop(s, "adjust_down", text="폭: 아래쪽 줄 수")
+        col.prop(s, "adjust_length", text=f"길이: 면 수 (전체 {adj['total']})")
+        layout.operator(FACE_ADJUST_IDNAME, text="기본 선택으로 초기화", icon='LOOP_BACK').target = 'RESET'
     else:
         adj = state.adjust
         p = adj['params']
