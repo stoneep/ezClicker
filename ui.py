@@ -154,6 +154,7 @@ def draw_adjust(layout, context):
         layout.label(text="엣지(또는 버텍스) 모드로 바꾸세요")
     elif not adjust_valid(context):
         layout.label(text="Alt+클릭으로 루프를 선택하세요", icon='INFO')
+        layout.label(text="(엣지·버텍스 모드에서 동작)")
         layout.label(text="선택을 바꾸면 이 패널은 쉬었다가")
         layout.label(text="다음 루프 선택부터 다시 동작합니다")
     else:
