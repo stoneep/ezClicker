@@ -38,7 +38,7 @@ Mirror Loop Select
 bl_info = {
     "name": "Mirror Loop Select",
     "author": "류우",
-    "version": (0, 12, 0),
+    "version": (0, 13, 0),
     "blender": (4, 0, 0),
     "location": "3D Viewport > Edit Mode > Alt + 클릭 = 루프 선택 / Ctrl + Alt + 클릭 = 시작 루프와 클릭한 루프 사이 전부 선택(버텍스·엣지·면) / Ctrl + Shift + Alt + 클릭 = 사이의 루프만 선택 / Alt + 더블클릭 = 같은 모양의 면 전부 선택(Shift+G > 모양) / Shift + Alt + 클릭 = 루프 선택 추가·해제 / (루프 선택 후) Alt + 휠 = 위·아래 동시 확장, Ctrl + 휠 = 한 방향 확장 / Alt + 1 = 사이드바 Mirror Loop 고정 패널 열기·닫기(폭·길이·링 조절, 엣지 모드에서 고른 루프를 버텍스 모드로 넘어가서 이어 조절해도 됨, 면 모드에서는 Blender 기본 Alt+클릭 면 루프 선택 결과의 폭·길이 조절) / 헤더 또는 우클릭 메뉴 = 확장 단계(끔·1단계·2단계) 전환",
     "description": "극점/삼각형에서 멈추지 않고 루프를 끝까지 선택 + 미러 축에서 끊긴 반대편 루프까지 선택 + Alt+휠로 위/아래 루프 확장/축소 + 루프와 루프 사이 전부(사이의 면까지) 선택 + 확장 단계 전환",
@@ -58,6 +58,10 @@ for _n in _SUBMODULES:
     _loaded = sys.modules.get("%s.%s" % (__name__, _n))
     if _loaded is not None:
         importlib.reload(_loaded)
+    elif _n in globals():
+        # sys.modules 에서는 지워졌는데 패키지 쪽에 낡은 모듈 객체가 속성으로 남아 있으면, 아래의 `from . import ...` 가
+        # 파일을 다시 읽지 않고 그 낡은 객체를 그대로 쓴다. (예: 새 기능이 state 에 추가한 함수가 없다는 오류) 그래서 지운다.
+        del globals()[_n]
 
 from . import (state, common, face_shape, face_patch, settings, face_core, edge_core, edge_outline,  # noqa: E402,F401
                edge_shape, edge_range, net_spread, edge_ops, face_ops, net_ops, prefs, ui, overlay)
@@ -120,3 +124,5 @@ def unregister():
     # 다음에 켤 때 덮어쓴 파일을 새로 읽도록 하위 모듈의 기억을 지운다.
     for _name in [n for n in sys.modules if n.startswith(__name__ + ".")]:
         del sys.modules[_name]
+    for _n in _SUBMODULES:
+        globals().pop(_n, None)
