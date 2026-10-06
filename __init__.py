@@ -36,25 +36,29 @@ Mirror Loop Select
 bl_info = {
     "name": "Mirror Loop Select",
     "author": "류우",
-    "version": (0, 11, 0),
+    "version": (0, 12, 0),
     "blender": (4, 0, 0),
     "location": "3D Viewport > Edit Mode > Alt + 클릭 = 루프 선택 / Ctrl + Alt + 클릭 = 시작 루프와 클릭한 루프 사이 전부 선택(버텍스·엣지·면) / Shift + Alt + 클릭 = 사이의 루프만 선택 / Alt + 더블클릭 = 같은 모양의 면 전부 선택(Shift+G > 모양) / Ctrl + Shift + Alt + 클릭 = 루프 선택 추가·해제 / (루프 선택 후) Alt + 휠 = 위·아래 동시 확장, Ctrl + 휠 = 한 방향 확장 / Alt + 1 = 사이드바 Mirror Loop 고정 패널 열기·닫기(폭·길이·링 조절, 엣지 모드에서 고른 루프를 버텍스 모드로 넘어가서 이어 조절해도 됨, 면 모드에서는 Blender 기본 Alt+클릭 면 루프 선택 결과의 폭·길이 조절) / 헤더 또는 우클릭 메뉴 = 확장 단계(끔·1단계·2단계) 전환",
     "description": "극점/삼각형에서 멈추지 않고 루프를 끝까지 선택 + 미러 축에서 끊긴 반대편 루프까지 선택 + Alt+휠로 위/아래 루프 확장/축소 + 루프와 루프 사이 전부(사이의 면까지) 선택 + 확장 단계 전환",
     "category": "Mesh",
 }
 
-# 애드온을 껐다 켜거나 Reload Scripts 를 할 때, 하위 모듈도 다시 읽도록 한다.
-# (순서는 의존 방향을 따른다: 아래쪽 모듈이 먼저)
-if "bpy" in locals():
-    import importlib
-    from . import (state, common, face_shape, face_patch, settings, face_core, edge_core, edge_outline, edge_shape, edge_range,
-                   edge_ops, face_ops, prefs, ui, overlay)
-    for _m in (state, common, face_shape, face_patch, settings, face_core, edge_core, edge_outline, edge_shape, edge_range,
-               edge_ops, face_ops, prefs, ui, overlay):
-        importlib.reload(_m)
-else:
-    from . import (state, common, face_shape, face_patch, settings, face_core, edge_core, edge_outline, edge_shape, edge_range,  # noqa: F401
-                   edge_ops, face_ops, prefs, ui, overlay)
+# 애드온을 끄고 켜거나(덮어쓴 파일을 다시 읽기), Reload Scripts 를 할 때 하위 모듈도 다시 읽도록 한다.
+# 파이썬은 한 번 읽은 모듈을 sys.modules 에 기억해 두고, Blender 가 애드온을 꺼도 하위 모듈(ui, edge_ops 등)은 지우지 않는다.
+# 그래서 파일을 덮어쓴 뒤 껐다 켜도 예전 코드가 그대로 쓰이는 일이 생긴다. (새 패널이 안 나오는 증상)
+# 아래에서 이미 기억된 하위 모듈은 의존 순서(아래쪽 모듈이 먼저)로 다시 읽고, unregister() 도 끝에 기억을 지운다.
+import importlib
+import sys
+
+_SUBMODULES = ("state", "common", "face_shape", "face_patch", "settings", "face_core", "edge_core", "edge_outline",
+               "edge_shape", "edge_range", "edge_ops", "face_ops", "prefs", "ui", "overlay")
+for _n in _SUBMODULES:
+    _loaded = sys.modules.get("%s.%s" % (__name__, _n))
+    if _loaded is not None:
+        importlib.reload(_loaded)
+
+from . import (state, common, face_shape, face_patch, settings, face_core, edge_core, edge_outline,  # noqa: E402,F401
+               edge_shape, edge_range, edge_ops, face_ops, prefs, ui, overlay)
 
 import bpy
 from bpy.props import PointerProperty
@@ -110,3 +114,7 @@ def unregister():
     del bpy.types.WindowManager.mls_settings
     for c in reversed(classes):
         bpy.utils.unregister_class(c)
+
+    # 다음에 켤 때 덮어쓴 파일을 새로 읽도록 하위 모듈의 기억을 지운다.
+    for _name in [n for n in sys.modules if n.startswith(__name__ + ".")]:
+        del sys.modules[_name]
