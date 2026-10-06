@@ -167,9 +167,10 @@ def draw_adjust(layout, context):
         adj = state.adjust
         s = get_settings(context)
         layout.label(text="면 루프 (Blender 기본 선택 기준)", icon='FACESEL')
+        layout.prop(s, "side_reference")
         col = layout.column(align=True)
-        col.prop(s, "adjust_up", text="폭: 위쪽 줄 수")
-        col.prop(s, "adjust_down", text="폭: 아래쪽 줄 수")
+        col.prop(s, "adjust_up", text="폭: 시계 방향 (줄 수)")
+        col.prop(s, "adjust_down", text="폭: 반시계 방향 (줄 수)")
         col.prop(s, "adjust_length", text=f"길이: 면 수 (전체 {adj['total']})")
         layout.operator(FACE_ADJUST_IDNAME, text="기본 선택으로 초기화", icon='LOOP_BACK').target = 'RESET'
     else:
@@ -181,6 +182,7 @@ def draw_adjust(layout, context):
 
         # 숫자칸: 클릭 드래그, 좌우 화살표, 더블클릭 입력이 모두 된다. (값은 state.adjust 와 항상 일치)
         s = get_settings(context)
+        layout.prop(s, "side_reference")
         col = layout.column(align=True)
         col.enabled = not ring        # 링은 폭/길이를 쓰지 않는다
         col.prop(s, "adjust_up")

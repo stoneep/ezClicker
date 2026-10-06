@@ -108,6 +108,30 @@ def _on_edge_similar_update(self, context):
         pass
 
 
+SIDE_REFERENCE_ITEMS = (
+    ('SCREEN', "화면", "클릭한 순간의 화면에서 오른쪽(루프가 세로에 가까우면 위쪽)으로 가는 쪽을 루프의 진행 방향으로 본다. "
+                      "시계 방향 쪽은 그 진행 방향을 표면 법선 둘레로 시계 방향으로 돌린 쪽이다", 'RESTRICT_VIEW_OFF', 0),
+    ('GLOBAL', "글로벌", "월드 축 중 루프가 가장 많이 가리키는 축의 + 방향을 진행 방향으로 본다. 화면을 돌려도 같은 쪽이다", 'WORLD', 1),
+    ('LOCAL', "로컬", "오브젝트 로컬 축 중 루프가 가장 많이 가리키는 축의 + 방향을 진행 방향으로 본다. 오브젝트를 회전해도 같은 쪽이다",
+     'OBJECT_ORIGIN', 2),
+)
+
+
+def _on_side_reference_update(self, context):
+    """방향 기준이 바뀌면 방금 고른 선택을 새 기준으로 다시 계산한다. (폭은 그대로, 시계/반시계 쪽만 바뀐다)"""
+    from .common import adjust_valid
+    adj = state.adjust
+    if adj is None or not adjust_valid(context):
+        return
+    try:
+        if adj.get('mode') == 'FACE':
+            bpy.ops.mesh.mirror_face_adjust('EXEC_DEFAULT', target='REFRESH')
+        else:
+            bpy.ops.mesh.mirror_loop_adjust('EXEC_DEFAULT', target='REFRESH')
+    except RuntimeError:
+        pass
+
+
 SIMILAR_MODES = (
     ('FLAT', "평평한 영역 외곽선",
      "이웃한 평평한 면들을 한 덩어리로 보고 외곽선 모양(변 길이, 꺾임 각)을 비교한다. 기어처럼 뾰족한 평면 모양에 정확하다", 'MESH_PLANE', 0),
@@ -118,6 +142,11 @@ SIMILAR_MODES = (
 
 
 class MLS_Settings(bpy.types.PropertyGroup):
+    side_reference: EnumProperty(
+        name="방향 기준",
+        description="폭의 '시계 방향 쪽/반시계 방향 쪽'을 무엇을 기준으로 정할지. 화면은 클릭한 순간에 정해 기억한다",
+        items=SIDE_REFERENCE_ITEMS, default='SCREEN', update=_on_side_reference_update,
+    )
     edge_similar_extend: BoolProperty(
         name="기존 선택에 추가",
         description="기존 선택을 지우지 않고 찾은 루프를 더한다",
@@ -212,14 +241,14 @@ class MLS_Settings(bpy.types.PropertyGroup):
         update=_on_geometry_update,
     )
     adjust_up: IntProperty(
-        name="폭: 위쪽 루프",
-        description="클릭한 루프에서 화면 위쪽으로 나란한 루프를 몇 줄 더 선택할지 (드래그/화살표/입력)",
+        name="폭: 시계 방향",
+        description="루프의 진행 방향에서 시계 방향 쪽으로 나란한 루프(면 모드는 면 줄)를 몇 줄 더 선택할지. 진행 방향은 '방향 기준'이 정한다",
         min=0, max=50,
         get=_adjust_getter('up'), set=_adjust_setter('UP', 'up'),
     )
     adjust_down: IntProperty(
-        name="폭: 아래쪽 루프",
-        description="클릭한 루프에서 화면 아래쪽으로 나란한 루프를 몇 줄 더 선택할지 (드래그/화살표/입력)",
+        name="폭: 반시계 방향",
+        description="루프의 진행 방향에서 반시계 방향 쪽으로 나란한 루프(면 모드는 면 줄)를 몇 줄 더 선택할지. 진행 방향은 '방향 기준'이 정한다",
         min=0, max=50,
         get=_adjust_getter('down'), set=_adjust_setter('DOWN', 'down'),
     )
@@ -277,6 +306,12 @@ def edge_similar_options(context):
         return SimpleNamespace(extend=False, scale_invariant=False, shape_tol=0.15, size_tol=0.02)
     return SimpleNamespace(extend=s.edge_similar_extend, scale_invariant=s.edge_similar_scale_invariant,
                            shape_tol=s.edge_similar_shape_tol / 100.0, size_tol=s.edge_similar_size_tol / 100.0)
+
+
+def side_reference(context):
+    """폭의 방향 기준 ('SCREEN' / 'GLOBAL' / 'LOCAL'). 설정이 아직 없으면 화면."""
+    s = get_settings(context)
+    return 'SCREEN' if s is None else s.side_reference
 
 
 def extension_enabled(context):

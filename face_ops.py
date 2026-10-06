@@ -46,10 +46,10 @@ from . import prefs, state
 from .common import (adjust_valid, ensure_tables, face_only_mode, get_mirror_axes, mesh_counts, pick_seed,
                      redraw_3d, restore_selection, screen_mid, screen_score, similar_valid, snapshot_selection)
 from .edge_range import ADJUST_LENGTH_MIN, ADJUST_STEP_MAX, find_between, selected_loop
-from .face_core import order_strip, strip_faces, strip_rails, strip_region
+from .face_core import has_screen, order_strip, strip_cw_is_left, strip_faces, strip_rails, strip_region
 from .face_patch import diagnose_seed, patch_seed_shapes, similar_patches
 from .face_shape import flat_island, island_shape, similar_islands
-from .settings import extension_enabled, geometry_options, similar_options, use_mirror_extension
+from .settings import extension_enabled, geometry_options, side_reference, similar_options, use_mirror_extension
 
 
 def selected_face_indices(bm):
@@ -76,8 +76,14 @@ def apply_strip(context, ob, adj, steps_up, steps_down, length_adjust):
     keep = max(1, total + length_adjust) if length_adjust < 0 else 0
     if keep >= total:
         keep = 0
-    up_left = adj['up_is_left']
-    steps_left, steps_right = (steps_up, steps_down) if up_left else (steps_down, steps_up)
+    # 폭의 '시계 방향 쪽'(steps_up)이 왼쪽 레일인지 오른쪽 레일인지: 방향 기준(화면/글로벌/로컬)으로 정한다.
+    # 화면 기준은 클릭한 순간에만 정할 수 있어 그때 기억해 둔 값을 쓴다. (사이드바 패널에는 3D 뷰 정보가 없다)
+    ref = side_reference(context)
+    cw_left = adj.get('cw_left_screen') if ref == 'SCREEN' else None
+    if cw_left is None:
+        cw_left = strip_cw_is_left(context, ob, chain, rails, min(adj['seed_pos'], len(chain) - 1),
+                                   'GLOBAL' if ref == 'SCREEN' else ref)
+    steps_left, steps_right = (steps_up, steps_down) if cw_left else (steps_down, steps_up)
     faces, eff_left, eff_right = strip_region(chain, adj['closed'], rails, adj['seed_pos'],
                                               steps_left, steps_right, keep)
 
@@ -90,7 +96,7 @@ def apply_strip(context, ob, adj, steps_up, steps_down, length_adjust):
         f.select_set(True)
     bm.select_flush_mode()
     bmesh.update_edit_mesh(ob.data, loop_triangles=False, destructive=False)
-    adj['up'], adj['down'] = (eff_left, eff_right) if up_left else (eff_right, eff_left)
+    adj['up'], adj['down'] = (eff_left, eff_right) if cw_left else (eff_right, eff_left)
     adj['keep'] = keep
     adj['params'].update({'steps_up': adj['up'], 'steps_down': adj['down'], 'length_adjust': length_adjust})
     return True
@@ -139,16 +145,14 @@ class MESH_OT_mirror_face_loop_select(bpy.types.Operator):
             rails = strip_rails(chain, closed, seed)
             if rails is None:
                 return {'FINISHED'}
-            up_is_left = True
-            if len(rails) > seed_pos:
-                lm, rm = screen_mid(context, ob, rails[seed_pos][0]), screen_mid(context, ob, rails[seed_pos][1])
-                if lm is not None and rm is not None:
-                    up_is_left = screen_score(lm - rm) >= 0.0
+            # 화면 기준 '시계 방향 쪽'은 지금(클릭한 순간의 3D 뷰)에만 정할 수 있어 기억해 둔다.
+            cw_left_screen = (strip_cw_is_left(context, ob, chain, rails, min(seed_pos, len(chain) - 1), 'SCREEN')
+                              if has_screen(context) else None)
             pre = set() if not self.extend else set(before[ob])
             state.set_adjust({
                 'mode': 'FACE', 'ob': ob.name, 'counts': mesh_counts(bm), 'seed': seed.index,
                 'chain': [f.index for f in chain], 'closed': closed, 'seed_pos': seed_pos,
-                'up_is_left': up_is_left, 'pre': pre, 'added': {i for i in s0 if i not in pre},
+                'cw_left_screen': cw_left_screen, 'pre': pre, 'added': {i for i in s0 if i not in pre},
                 'up': 0, 'down': 0, 'keep': 0, 'total': len(chain),
                 'params': {'steps_up': 0, 'steps_down': 0, 'length_adjust': 0},
             })
@@ -183,10 +187,11 @@ class MESH_OT_mirror_face_adjust(bpy.types.Operator):
     target: EnumProperty(
         name="Target",
         items=(
-            ('UP', "폭: 위쪽", "화면 위쪽으로 나란한 면 줄을 더 붙이거나 줄인다"),
-            ('DOWN', "폭: 아래쪽", "화면 아래쪽으로 나란한 면 줄을 더 붙이거나 줄인다"),
+            ('UP', "폭: 시계 방향", "시계 방향 쪽으로 나란한 면 줄을 더 붙이거나 줄인다"),
+            ('DOWN', "폭: 반시계 방향", "반시계 방향 쪽으로 나란한 면 줄을 더 붙이거나 줄인다"),
             ('LENGTH', "길이", "줄을 따라 몇 칸까지 고를지"),
             ('RESET', "초기화", "Blender 기본 면 루프 선택 결과로 되돌린다"),
+            ('REFRESH', "다시 계산", "값은 그대로 두고 현재 방향 기준으로 다시 고른다"),
         ),
         default='UP',
     )
@@ -217,7 +222,7 @@ class MESH_OT_mirror_face_adjust(bpy.types.Operator):
             lowest = max(ADJUST_LENGTH_MIN, -(adj['total'] - 1))
             want = (self.value - adj['total']) if absolute else length + d
             length = min(max(want, lowest), 0)
-        else:
+        elif t == 'RESET':
             up = down = length = 0
 
         if not apply_strip(context, context.edit_object, adj, up, down, length):

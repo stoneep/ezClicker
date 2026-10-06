@@ -36,9 +36,9 @@ from .common import (adjust_valid, similar_edge_valid, ensure_tables, face_only_
 from .edge_core import CREASE_SIMILAR, crease_angle
 from .edge_range import (ADJUST_LENGTH_MIN, ADJUST_STEP_MAX, apply_range, build_sides, new_wheel_state,
                          ring_edges, selected_loop, state_valid, step_both_sides, step_one_side)
-from .face_core import init_faces
+from .face_core import has_screen, init_faces_oriented
 from .edge_shape import selected_chains, seed_shapes, similar_loops
-from .settings import (edge_similar_options, extension_enabled, geometry_options, get_settings,
+from .settings import (edge_similar_options, extension_enabled, geometry_options, get_settings, side_reference,
                        use_mirror_extension)
 
 
@@ -144,11 +144,17 @@ def run_selection(context, p):
         core = {e.index for e in loop} | {e.index for e in mirror}
         st = new_wheel_state(ob, bm, seed, core, axes, p.threshold, cos_limit, dih, full_idxs)
         st['keep'], st['ref_dir'] = keep, ref_dir
-        # 위/아래(+쪽/-쪽)는 '클릭한 순간의 화면'으로 한 번만 정해 기억한다. 사이드바 패널에서 다시 계산할 때는
-        # 3D 뷰의 화면 정보가 없어(패널 영역) 화면 기준으로 다시 정하면 방향이 제멋대로 정해지기 때문이다.
-        faces0 = stored_faces0(bm, seed, getattr(p, 'faces0', None)) or init_faces(context, ob, seed)
+        # 폭의 '시계 방향 쪽'(+쪽)은 진행 방향 기준으로 정한다. 진행 방향의 부호는 방향 기준(화면/글로벌/로컬)이 정한다.
+        # 화면 기준은 클릭한 순간의 3D 뷰로만 정할 수 있다. 사이드바 패널에서 다시 계산할 때는 3D 뷰 정보가 없으므로
+        # 그때 정해 둔 값(faces0_screen)을 쓰고, 없으면 글로벌로 대신한다. 글로벌/로컬은 언제 계산해도 같다.
+        faces_screen = stored_faces0(bm, seed, getattr(p, 'faces0_screen', None))
+        if has_screen(context):
+            faces_screen = init_faces_oriented(context, ob, seed, 'SCREEN')
+        ref = side_reference(context)
+        faces0 = (faces_screen if ref == 'SCREEN' and faces_screen else
+                  init_faces_oriented(context, ob, seed, 'GLOBAL' if ref == 'SCREEN' else ref))
         st['faces'][0] = faces0
-        params['faces0'] = faces0
+        params['faces0_screen'] = faces_screen
         expand_sides(context, ob, bm, seed, st, p.steps_up, p.steps_down)
         if use_wheel:
             state.set_wheel(st)
@@ -185,13 +191,13 @@ class MESH_OT_mirror_loop_select(bpy.types.Operator):
         default=False, options={'SKIP_SAVE'},
     )
     steps_up: IntProperty(
-        name="폭: 위쪽 루프 (+/-)",
-        description="클릭한 루프에서 화면 위쪽으로 나란한 루프를 몇 줄 더 선택할지 (루프의 폭)",
+        name="폭: 시계 방향 (+/-)",
+        description="루프의 진행 방향에서 시계 방향 쪽으로 나란한 루프를 몇 줄 더 선택할지 (루프의 폭)",
         default=0, min=0, max=50, options={'SKIP_SAVE'},   # soft_max 를 따로 두지 않아야 +/- 화살표도 끝까지(50) 올라간다
     )
     steps_down: IntProperty(
-        name="폭: 아래쪽 루프 (+/-)",
-        description="클릭한 루프에서 화면 아래쪽으로 나란한 루프를 몇 줄 더 선택할지 (루프의 폭)",
+        name="폭: 반시계 방향 (+/-)",
+        description="루프의 진행 방향에서 반시계 방향 쪽으로 나란한 루프를 몇 줄 더 선택할지 (루프의 폭)",
         default=0, min=0, max=50, options={'SKIP_SAVE'},   # soft_max 를 따로 두지 않아야 +/- 화살표도 끝까지(50) 올라간다
     )
     length_adjust: IntProperty(
@@ -394,7 +400,7 @@ class MESH_OT_mirror_loop_step(bpy.types.Operator):
             bm.normal_update()   # 다이헤드럴 계산에 쓰는 면 법선을 최신으로
 
         if 0 not in st['faces']:
-            st['faces'][0] = init_faces(context, ob, bm.edges[st['seeds'][0]])
+            st['faces'][0] = init_faces_oriented(context, ob, bm.edges[st['seeds'][0]], side_reference(context))
 
         lo, hi = st['lo'], st['hi']
         if self.both_sides:
@@ -428,8 +434,8 @@ class MESH_OT_mirror_loop_adjust(bpy.types.Operator):
     target: EnumProperty(
         name="Target",
         items=(
-            ('UP', "폭: 위쪽", "화면 위쪽으로 나란한 루프를 늘리거나 줄인다"),
-            ('DOWN', "폭: 아래쪽", "화면 아래쪽으로 나란한 루프를 늘리거나 줄인다"),
+            ('UP', "폭: 시계 방향", "시계 방향 쪽으로 나란한 루프를 늘리거나 줄인다"),
+            ('DOWN', "폭: 반시계 방향", "반시계 방향 쪽으로 나란한 루프를 늘리거나 줄인다"),
             ('LENGTH', "길이", "루프를 따라가는 엣지 수를 줄이거나(-) 되돌린다(+)"),
             ('RING', "링", "루프 대신 링(나란히 쌓인 엣지 한 줄)으로 바꾸거나 되돌린다"),
             ('RESET', "초기화", "폭과 길이를 처음 클릭한 상태(루프 전체)로 되돌린다"),

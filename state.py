@@ -12,7 +12,7 @@ state.py — 모듈 사이에서 공유하는 런타임 상태.
            {'ob', 'params'(선택을 다시 계산할 값들), 'snap'(클릭 전 선택), 'counts', 'core'(기준 루프 엣지),
             'up', 'down'(실제로 늘어난 폭), 'keep', 'total'(길이)}
            면 모드(mode='FACE')는 기본 면 루프 선택이 고른 줄을 기억한다:
-           {'chain'(줄의 면 인덱스 순서), 'closed', 'seed', 'seed_pos', 'up_is_left', 'pre'(원래 선택), 'added'(우리가 고른 면), ...}
+           {'chain'(줄의 면 인덱스 순서), 'closed', 'seed', 'seed_pos', 'cw_left_screen', 'pre'(원래 선택), 'added'(우리가 고른 면), ...}
   similar : 마지막 '같은 모양 면 선택' 결과. 패널 옵션이 바뀌면 같은 기준 면으로 다시 찾는 데 쓴다.
            {'seeds'(오브젝트별 기준 면), 'snap'(찾기 전 선택), 'found'(오브젝트별 찾은 면), 'counts', 'regions', 'faces'}
   similar_edge : 마지막 '같은 모양 엣지 루프' 결과. 옵션이 바뀌면 같은 씨앗 루프로 다시 찾는 데 쓴다.

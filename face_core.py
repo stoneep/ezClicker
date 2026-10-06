@@ -5,11 +5,15 @@ bmesh 만 다루고 오퍼레이터/UI 는 모른다. 엣지 알고리즘(edge_c
 (edge_range 가 이쪽의 opposite_edge 를 가져다 쓴다. 의존 방향: edge -> face -> common)
 
   - opposite_edge : 사각형 면에서 맞은편 엣지 (루프에서 옆 루프로 넘어갈 때 쓴다)
-  - init_faces    : 씨앗 엣지의 양쪽 면 중 어느 쪽이 화면 '위'인지 정한다
+  - init_faces    : 씨앗 엣지의 양쪽 면 중 어느 쪽이 화면 '위'인지 정한다 (예전 방식)
+  - init_faces_oriented / strip_cw_is_left : 폭의 '시계 방향 쪽'을 화면·글로벌·로컬 기준으로 정한다
   - strip_faces   : 순서대로 놓인 루프들 사이의 면을 모은다
   - order_strip / strip_region : Blender 기본 면 루프 선택이 고른 면 줄을 순서대로 읽고,
                     폭(옆 줄 수)과 길이(면 수)를 바꾼 면 집합을 다시 계산한다
 """
+
+from bpy_extras import view3d_utils
+from mathutils import Vector
 
 from .common import screen_mid, screen_score
 
@@ -49,6 +53,102 @@ def init_faces(context, ob, seed):
     else:
         fwd, back = faces[1], faces[0]
     return (back.index, fwd.index)
+
+
+# ---------------------------------------------------------------------------
+# 폭의 방향: 시계 방향 쪽 / 반시계 방향 쪽
+#
+# 루프(또는 면 줄)가 진행하는 방향 d 와 표면의 바깥 법선 n 이 있으면, d 를 n 둘레로 시계 방향으로 돌린 쪽(d x n)이
+# '시계 방향 쪽', 반대가 '반시계 방향 쪽'이다. d 의 부호(어느 쪽으로 진행하는 걸로 볼지)는 기준에 따라 정한다.
+#   화면(SCREEN) : 화면에서 오른쪽(세로에 가까우면 위쪽)으로 가는 쪽. 클릭한 순간의 화면이다.
+#   글로벌(GLOBAL): 월드 축 중 가장 많이 가리키는 축의 + 방향.
+#   로컬(LOCAL)   : 오브젝트 로컬 축 중 가장 많이 가리키는 축의 + 방향.
+# ---------------------------------------------------------------------------
+
+SIDE_REFERENCES = ('SCREEN', 'GLOBAL', 'LOCAL')
+
+
+def has_screen(context):
+    """3D 뷰의 화면 정보(영역, 뷰 행렬)가 있는지. 사이드바 패널 안에서는 없다."""
+    return context.region is not None and context.region_data is not None
+
+
+def _positive_sign(vec):
+    """vec 의 가장 큰 성분이 양수면 1, 아니면 -1."""
+    i = max(range(3), key=lambda k: abs(vec[k]))
+    return 1.0 if vec[i] >= 0.0 else -1.0
+
+
+def travel_direction(context, ob, vec_local, p0_local, p1_local, mode):
+    """진행 방향(로컬 좌표). vec_local 은 진행선을 대표하는 벡터, p0/p1 은 화면 부호를 정할 때 투영할 양 끝점."""
+    if mode == 'SCREEN' and has_screen(context):
+        a = view3d_utils.location_3d_to_region_2d(context.region, context.region_data, ob.matrix_world @ p0_local)
+        b = view3d_utils.location_3d_to_region_2d(context.region, context.region_data, ob.matrix_world @ p1_local)
+        if a is not None and b is not None and (b - a).length > 1e-6:
+            return vec_local if screen_score(b - a) >= 0.0 else -vec_local
+    if mode == 'LOCAL':
+        return vec_local * _positive_sign(vec_local)
+    world = ob.matrix_world.to_3x3() @ vec_local          # 글로벌 (화면 정보가 없을 때의 대체이기도 하다)
+    return vec_local * _positive_sign(world)
+
+
+def clockwise_vector(ob, d, n):
+    """진행 방향 d, 표면 법선 n 에서 '시계 방향 쪽'을 가리키는 벡터. 음수 스케일(거울) 오브젝트는 손잡이가 뒤집힌다."""
+    cw = d.cross(n)
+    return -cw if ob.matrix_world.determinant() < 0.0 else cw
+
+
+def init_faces_oriented(context, ob, seed, mode):
+    """
+    init_faces 와 같은 (뒤쪽 면, 앞쪽 면) 인덱스. 다만 앞쪽(+쪽, 폭 '시계 방향')을 화면 위가 아니라
+    '진행 방향 기준 시계 방향 쪽 면'으로 정한다. 진행 방향의 부호는 mode(화면/글로벌/로컬)가 정한다.
+    """
+    faces = [f for f in seed.link_faces if not f.hide][:2]
+    if not faces:
+        return (None, None)
+    a, b = seed.verts
+    d = travel_direction(context, ob, b.co - a.co, a.co, b.co, mode).normalized()
+    n = sum((f.normal for f in faces), Vector())
+    n = faces[0].normal.copy() if n.length < 1e-9 else n.normalized()
+    cw = clockwise_vector(ob, d, n)
+    mid = (a.co + b.co) * 0.5
+    scores = []
+    for f in faces:
+        opp = opposite_edge(f, seed)
+        v = ((opp.verts[0].co + opp.verts[1].co) * 0.5 - mid) if opp is not None else (f.calc_center_median() - mid)
+        scores.append(v.dot(cw))
+    if len(faces) == 1:
+        return (None, faces[0].index) if scores[0] >= 0.0 else (faces[0].index, None)
+    if scores[0] >= scores[1]:
+        fwd, back = faces[0], faces[1]
+    else:
+        fwd, back = faces[1], faces[0]
+    return (back.index, fwd.index)
+
+
+def strip_cw_is_left(context, ob, chain, rails, pos, mode):
+    """면 줄에서 '시계 방향 쪽'이 왼쪽 레일 쪽이면 True. 줄 진행 방향의 부호는 mode 가 정한다."""
+    n = len(chain)
+    f = chain[pos]
+    c0 = f.calc_center_median()
+    if n >= 2:
+        j = pos + 1 if pos + 1 < n else pos - 1
+        other = chain[j].calc_center_median()
+        t = (other - c0) if j > pos else (c0 - other)
+        p0, p1 = (c0, other) if j > pos else (other, c0)
+    else:
+        left_mid = (rails[pos][0].verts[0].co + rails[pos][0].verts[1].co) * 0.5
+        right_mid = (rails[pos][1].verts[0].co + rails[pos][1].verts[1].co) * 0.5
+        side = left_mid - right_mid
+        # 면이 하나뿐이면 레일에 직각인 방향을 줄 방향으로 본다
+        t = f.normal.cross(side)
+        p0, p1 = c0, c0 + t
+    if t.length < 1e-9:
+        return True
+    d = travel_direction(context, ob, t, p0, p1, mode).normalized()
+    cw = clockwise_vector(ob, d, f.normal)
+    left_mid = (rails[pos][0].verts[0].co + rails[pos][0].verts[1].co) * 0.5
+    return (left_mid - c0).dot(cw) >= 0.0
 
 
 def strip_faces(bm, loop_sets):

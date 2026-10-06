@@ -113,6 +113,8 @@ def snapshot_selection(objs):
 
 def restore_selection(objs, snap):
     for ob in objs:
+        if ob not in snap:
+            continue                      # 기록 당시와 다른 오브젝트(같은 이름으로 다시 만든 경우 등)는 건드리지 않는다
         bm = bmesh.from_edit_mesh(ob.data)
         bm.verts.ensure_lookup_table()
         bm.edges.ensure_lookup_table()
