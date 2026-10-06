@@ -204,3 +204,36 @@ def similar_edge_valid(context):
         if not all(edges[i].select for i in info['found'].get(ob.name, ())):
             return False
     return True
+
+
+def pick_vertex(context, ob, verts, mouse):
+    """verts 중 마우스에 가장 가까운 버텍스 (화면 좌표 기준). 화면 정보가 없으면 첫 버텍스."""
+    region, rv3d = context.region, context.region_data
+    best, best_d = None, None
+    if region is not None and rv3d is not None:
+        mw = ob.matrix_world
+        for v in verts:
+            p = view3d_utils.location_3d_to_region_2d(region, rv3d, mw @ v.co)
+            if p is not None:
+                d = (p - mouse).length
+                if best_d is None or d < best_d:
+                    best, best_d = v, d
+    return best if best is not None else next(iter(verts))
+
+
+def spread_valid(context):
+    """마지막 '버텍스에서 퍼뜨리기' 결과가 그대로인지: 편집 중이고, 메시가 같고, 선택한 버텍스가 아직 선택돼 있다."""
+    info = state.spread
+    if info is None or context.mode != 'EDIT_MESH':
+        return False
+    for ob in context.objects_in_mode_unique_data:
+        if ob.name not in info['counts']:
+            return False
+        bm = bmesh.from_edit_mesh(ob.data)
+        if mesh_counts(bm) != info['counts'][ob.name]:
+            return False
+        bm.verts.ensure_lookup_table()
+        verts = bm.verts
+        if not all(verts[i].select for i in info['found'].get(ob.name, ())):
+            return False
+    return True

@@ -17,6 +17,8 @@ Mirror Loop Select
   edge_shape.py  [엣지] 같은 모양의 엣지 루프 찾기 (톱니바퀴 림 윤곽, 푸리에 진폭 비교)
   edge_ops.py    [엣지] Alt+클릭 루프 선택, Alt/Ctrl+휠 확장, 같은 모양 엣지 루프 오퍼레이터
 
+  net_spread.py  [메시] 버텍스에서 그물망처럼 퍼뜨리기 (Seam/Sharp 마크 엣지까지만)
+  net_ops.py     [메시] Alt+우클릭 버텍스에서 퍼뜨려 선택 오퍼레이터
   face_core.py   [면]   사각형 면 위상 헬퍼, 루프 사이의 면 모으기
   face_shape.py  [면]   평평한 면 영역의 모양 비교 (같은 모양 찾기)
   face_patch.py  [면]   매끈한 덩어리의 경계 엣지 루프 비교 (베벨·둥근 모양, 폴리 수가 달라도 같은 모양 찾기)
@@ -51,21 +53,21 @@ import importlib
 import sys
 
 _SUBMODULES = ("state", "common", "face_shape", "face_patch", "settings", "face_core", "edge_core", "edge_outline",
-               "edge_shape", "edge_range", "edge_ops", "face_ops", "prefs", "ui", "overlay")
+               "edge_shape", "edge_range", "net_spread", "edge_ops", "face_ops", "net_ops", "prefs", "ui", "overlay")
 for _n in _SUBMODULES:
     _loaded = sys.modules.get("%s.%s" % (__name__, _n))
     if _loaded is not None:
         importlib.reload(_loaded)
 
 from . import (state, common, face_shape, face_patch, settings, face_core, edge_core, edge_outline,  # noqa: E402,F401
-               edge_shape, edge_range, edge_ops, face_ops, prefs, ui, overlay)
+               edge_shape, edge_range, net_spread, edge_ops, face_ops, net_ops, prefs, ui, overlay)
 
 import bpy
 from bpy.props import PointerProperty
 
 
 # 클래스 / 키맵 / 패널 설정을 내놓는 모듈. 등록은 이 순서대로 한다.
-MODULES = (settings, edge_ops, face_ops, prefs, ui)
+MODULES = (settings, edge_ops, face_ops, net_ops, prefs, ui)
 
 classes = tuple(c for m in MODULES for c in m.classes)
 addon_keymaps = []

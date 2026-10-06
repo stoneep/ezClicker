@@ -21,7 +21,7 @@ import bpy
 from bpy.props import EnumProperty
 
 from . import prefs, state
-from .common import adjust_mode, adjust_valid, face_only_mode, similar_edge_valid, similar_valid
+from .common import adjust_mode, adjust_valid, face_only_mode, similar_edge_valid, similar_valid, spread_valid
 from .settings import LEVEL_ICON, LEVEL_ITEMS, LEVEL_SHORT, get_settings
 
 
@@ -340,6 +340,37 @@ class VIEW3D_PT_mirror_loop_similar_edge(bpy.types.Panel):
         layout.label(text="옵션을 바꾸면 같은 루프로 다시 찾습니다")
 
 
+class VIEW3D_PT_mirror_loop_spread(bpy.types.Panel):
+    """퍼뜨리기: 버텍스 하나에서 그물망처럼 퍼뜨려 선택하되 Seam / Sharp 로 마크한 엣지까지만 선택한다."""
+    bl_label = "퍼뜨리기 (Seam/Sharp까지)"
+    bl_idname = "VIEW3D_PT_mirror_loop_spread"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = "Mirror Loop"
+
+    @classmethod
+    def poll(cls, context):
+        return context.mode == 'EDIT_MESH'
+
+    def draw(self, context):
+        s = get_settings(context)
+        if s is None:
+            return
+        layout = self.layout
+        layout.operator("mesh.mirror_net_spread", text="선택한 버텍스에서 퍼뜨리기", icon='MOD_MESHDEFORM')
+        info = state.spread
+        if info is not None and not info.get('pending') and spread_valid(context):
+            layout.label(text="버텍스 %d · 엣지 %d · 면 %d" % (info['verts'], info['edges'], info['faces']), icon='CHECKMARK')
+            layout.label(text="마크에서 멈춘 엣지 %d개" % info['blocked'])
+        else:
+            layout.label(text="버텍스를 고르거나 Alt+우클릭하세요")
+        col = layout.column(align=True)
+        col.prop(s, "net_stop_seam")
+        col.prop(s, "net_stop_sharp")
+        col.prop(s, "net_extend")
+        layout.label(text="옵션을 바꾸면 같은 시작점에서 다시 퍼뜨립니다")
+
+
 def draw_header_button(self, context):
     """3D 뷰포트 헤더(편집 모드)에 현재 단계를 보여주는 버튼."""
     if context.mode != 'EDIT_MESH':
@@ -404,4 +435,5 @@ classes = (
     VIEW3D_PT_mirror_loop_adjust_options,
     VIEW3D_PT_mirror_loop_similar,
     VIEW3D_PT_mirror_loop_similar_edge,
+    VIEW3D_PT_mirror_loop_spread,
 )

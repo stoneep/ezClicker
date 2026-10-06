@@ -17,6 +17,8 @@ state.py — 모듈 사이에서 공유하는 런타임 상태.
            {'seeds'(오브젝트별 기준 면), 'snap'(찾기 전 선택), 'found'(오브젝트별 찾은 면), 'counts', 'regions', 'faces'}
   similar_edge : 마지막 '같은 모양 엣지 루프' 결과. 옵션이 바뀌면 같은 씨앗 루프로 다시 찾는 데 쓴다.
            {'seeds'(오브젝트별 씨앗 엣지), 'snap', 'found'(오브젝트별 찾은 엣지), 'counts', 'loops'}
+  spread : 마지막 '버텍스에서 퍼뜨리기' 결과. 옵션이 바뀌면 같은 시작 버텍스로 다시 퍼뜨리는 데 쓴다.
+           {'seeds'(오브젝트별 시작 버텍스), 'snap', 'found'(오브젝트별 선택한 버텍스), 'counts', 'faces', 'edges', 'verts', 'blocked'}
   keymap_items : __init__.register() 가 등록한 단축키 목록. 환경설정(prefs)이 이걸 보고 그린다.
            각 항목은 {'idname', 'kmi', 'km_name', 'title', 'desc'} 딕셔너리.
 """
@@ -26,6 +28,7 @@ anchor = None
 adjust = None
 similar = None
 similar_edge = None
+spread = None
 keymap_items = []
 last_info = None      # 마지막 루프 선택이 어떤 규칙으로 몇 개를 골랐는지(상태 표시줄 안내용)
 
@@ -79,10 +82,21 @@ def reset_similar_edge():
     similar_edge = None
 
 
+def set_spread(info):
+    global spread
+    spread = info
+
+
+def reset_spread():
+    global spread
+    spread = None
+
+
 def reset_all():
-    global wheel, anchor, adjust, similar, similar_edge
+    global wheel, anchor, adjust, similar, similar_edge, spread
     wheel = None
     anchor = None
     adjust = None
     similar = None
     similar_edge = None
+    spread = None

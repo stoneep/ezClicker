@@ -108,6 +108,17 @@ def _on_edge_similar_update(self, context):
         pass
 
 
+def _on_spread_update(self, context):
+    """퍼뜨리기 옵션이 바뀌면, 방금 퍼뜨린 결과를 같은 시작 버텍스로 새 옵션에 맞춰 다시 퍼뜨린다."""
+    from .common import spread_valid
+    if state.spread is None or not spread_valid(context):
+        return
+    try:
+        bpy.ops.mesh.mirror_net_spread('EXEC_DEFAULT', refresh=True)
+    except RuntimeError:
+        pass
+
+
 SIDE_REFERENCE_ITEMS = (
     ('SCREEN', "화면", "클릭한 순간의 화면에서 오른쪽(루프가 세로에 가까우면 위쪽)으로 가는 쪽을 루프의 진행 방향으로 본다. "
                       "시계 방향 쪽은 그 진행 방향을 표면 법선 둘레로 시계 방향으로 돌린 쪽이다", 'RESTRICT_VIEW_OFF', 0),
@@ -142,6 +153,21 @@ SIMILAR_MODES = (
 
 
 class MLS_Settings(bpy.types.PropertyGroup):
+    net_stop_seam: BoolProperty(
+        name="Seam 에서 멈춤",
+        description="Seam(심)으로 마크한 엣지까지만 선택하고 그 너머로는 퍼지지 않는다",
+        default=True, update=_on_spread_update,
+    )
+    net_stop_sharp: BoolProperty(
+        name="Sharp 에서 멈춤",
+        description="Sharp(샤프)로 마크한 엣지까지만 선택하고 그 너머로는 퍼지지 않는다",
+        default=True, update=_on_spread_update,
+    )
+    net_extend: BoolProperty(
+        name="기존 선택에 추가",
+        description="기존 선택을 지우지 않고 퍼진 영역을 더한다",
+        default=False, update=_on_spread_update,
+    )
     side_reference: EnumProperty(
         name="방향 기준",
         description="폭의 '시계 방향 쪽/반시계 방향 쪽'을 무엇을 기준으로 정할지. 화면은 클릭한 순간에 정해 기억한다",
@@ -306,6 +332,15 @@ def edge_similar_options(context):
         return SimpleNamespace(extend=False, scale_invariant=False, shape_tol=0.15, size_tol=0.02)
     return SimpleNamespace(extend=s.edge_similar_extend, scale_invariant=s.edge_similar_scale_invariant,
                            shape_tol=s.edge_similar_shape_tol / 100.0, size_tol=s.edge_similar_size_tol / 100.0)
+
+
+def spread_options(context):
+    """퍼뜨리기 옵션 (설정이 아직 없으면 기본값)."""
+    from types import SimpleNamespace
+    s = get_settings(context)
+    if s is None:
+        return SimpleNamespace(stop_seam=True, stop_sharp=True, extend=False)
+    return SimpleNamespace(stop_seam=s.net_stop_seam, stop_sharp=s.net_stop_sharp, extend=s.net_extend)
 
 
 def side_reference(context):
