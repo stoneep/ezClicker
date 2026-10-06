@@ -74,6 +74,7 @@ def run_selection(context, p):
     """
     state.reset_wheel()
     state.reset_adjust()
+    state.reset_spread()
     state.last_info = None
     ob = next((o for o in context.objects_in_mode_unique_data if o.name == p.seed_object), None)
     if ob is None or p.seed_edge < 0:

@@ -341,7 +341,7 @@ class VIEW3D_PT_mirror_loop_similar_edge(bpy.types.Panel):
 
 
 class VIEW3D_PT_mirror_loop_spread(bpy.types.Panel):
-    """퍼뜨리기: 버텍스 하나에서 그물망처럼 퍼뜨려 선택하되 Seam / Sharp 로 마크한 엣지까지만 선택한다."""
+    """퍼뜨리기: 버텍스에서 한 칸씩 이어 붙여 선택한다(Select More 와 같은 원리). Seam / Sharp 마크 엣지를 만나면 거기까지만 선택한다."""
     bl_label = "퍼뜨리기 (Seam/Sharp까지)"
     bl_idname = "VIEW3D_PT_mirror_loop_spread"
     bl_space_type = 'VIEW_3D'
@@ -360,15 +360,22 @@ class VIEW3D_PT_mirror_loop_spread(bpy.types.Panel):
         layout.operator("mesh.mirror_net_spread", text="선택한 버텍스에서 퍼뜨리기", icon='MOD_MESHDEFORM')
         info = state.spread
         if info is not None and not info.get('pending') and spread_valid(context):
-            layout.label(text="버텍스 %d · 엣지 %d · 면 %d" % (info['verts'], info['edges'], info['faces']), icon='CHECKMARK')
+            layout.label(text="%d단계까지 · 버텍스 %d · 엣지 %d · 면 %d" % (info['levels'], info['verts'], info['edges'], info['faces']),
+                         icon='CHECKMARK')
             layout.label(text="마크에서 멈춘 엣지 %d개" % info['blocked'])
         else:
             layout.label(text="버텍스를 고르거나 Alt+우클릭하세요")
         col = layout.column(align=True)
+        sub = col.row(align=True)
+        sub.enabled = not s.net_unlimited
+        sub.prop(s, "net_steps")
+        col.prop(s, "net_unlimited")
+        col.prop(s, "net_face_step")
+        col = layout.column(align=True)
         col.prop(s, "net_stop_seam")
         col.prop(s, "net_stop_sharp")
         col.prop(s, "net_extend")
-        layout.label(text="옵션을 바꾸면 같은 시작점에서 다시 퍼뜨립니다")
+        layout.label(text="퍼뜨린 직후 Alt+휠로도 단계를 바꿉니다")
 
 
 def draw_header_button(self, context):

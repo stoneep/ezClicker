@@ -153,6 +153,21 @@ SIMILAR_MODES = (
 
 
 class MLS_Settings(bpy.types.PropertyGroup):
+    net_steps: IntProperty(
+        name="단계",
+        description="시작 버텍스에서 몇 칸(링)까지 퍼뜨릴지. Select More 를 그 횟수만큼 누른 것과 같다",
+        default=1, min=1, max=1000, soft_max=30, update=_on_spread_update,
+    )
+    net_unlimited: BoolProperty(
+        name="끝까지",
+        description="단계 수와 상관없이 더 이상 늘지 않을 때까지(마크 엣지에 막히거나 메시 끝까지) 퍼뜨린다",
+        default=False, update=_on_spread_update,
+    )
+    net_face_step: BoolProperty(
+        name="면 단위로 (대각선 포함)",
+        description="켜면 한 단계마다 닿은 면의 모든 버텍스를 더한다(Blender 기본 Select More). 끄면 엣지로 바로 이어진 버텍스만 더한다",
+        default=True, update=_on_spread_update,
+    )
     net_stop_seam: BoolProperty(
         name="Seam 에서 멈춤",
         description="Seam(심)으로 마크한 엣지까지만 선택하고 그 너머로는 퍼지지 않는다",
@@ -339,8 +354,9 @@ def spread_options(context):
     from types import SimpleNamespace
     s = get_settings(context)
     if s is None:
-        return SimpleNamespace(stop_seam=True, stop_sharp=True, extend=False)
-    return SimpleNamespace(stop_seam=s.net_stop_seam, stop_sharp=s.net_stop_sharp, extend=s.net_extend)
+        return SimpleNamespace(steps=1, face_step=True, stop_seam=True, stop_sharp=True, extend=False)
+    return SimpleNamespace(steps=0 if s.net_unlimited else s.net_steps, face_step=s.net_face_step,
+                           stop_seam=s.net_stop_seam, stop_sharp=s.net_stop_sharp, extend=s.net_extend)
 
 
 def side_reference(context):

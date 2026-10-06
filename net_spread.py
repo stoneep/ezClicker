@@ -1,69 +1,71 @@
 """
-net_spread.py — [메시] 버텍스에서 그물망처럼 퍼뜨려 선택하되, 마크한 엣지(Seam / Sharp)에서 멈추기.
+net_spread.py — [메시] 버텍스에서 한 칸씩 이어 붙여 선택하기 (Select More 와 같은 원리) + Seam / Sharp 마크에서 멈추기.
 
 bmesh 만 다루고 오퍼레이터/UI 는 모른다.
 
-Blender 의 '연결된 것 선택'(L, Delimit)과 같은 규칙으로, 시작 버텍스에 닿은 면에서 출발해 '막지 않는 엣지'를 건너 이웃 면으로
-퍼진다. 막는 엣지(Seam, Sharp 로 마크한 엣지)는 건너지 않지만 그 엣지 자체와 양끝 버텍스는 선택된다. (마크까지만 선택, 그 너머는 안 함)
-버텍스 하나씩 그래프를 따라가지 않고 면을 따라가는 이유: 마크 선 위의 버텍스는 양쪽 영역에 모두 속해서, 버텍스 기준으로 퍼지면
-마크 선을 타고 반대편 영역으로 새기 때문이다. 면 기준이면 새지 않는다.
+Blender 의 Select More 처럼 시작 버텍스에서 한 단계마다 이웃 버텍스를 더한다.
+  - 면 단위(face_step, 기본): 선택한 버텍스에 닿은 면의 모든 버텍스를 더한다. (대각선 포함, Blender 기본 Select More 와 같다)
+  - 엣지 단위: 엣지로 바로 이어진 버텍스만 더한다.
+Seam 이나 Sharp 로 마크한 엣지에 닿은 버텍스(마크 선 위의 버텍스)는 모두 '끝점'이다. 끝점까지는 선택하지만 거기서 다음 단계로
+퍼지지 않으므로 마크 선을 타고 반대편 영역으로 새지 않는다. 영역을 둘러싼 마크 선의 엣지는 양 끝 버텍스가 모두 선택되므로 엣지째
+선택된다. (시작 버텍스 자신은 마크 선 위에 있어도 퍼진다.)
 
-면이 없는 엣지(와이어, 느슨한 엣지)는 같은 규칙으로 버텍스를 따라 퍼진다.
+steps = 0 이면 더 이상 늘지 않을 때까지(마크에 막히거나 메시 끝까지) 퍼진다. 면이 없는 엣지(와이어)도 같은 규칙이다.
 """
 
 
 def is_blocking(e, stop_seam, stop_sharp):
-    """이 엣지를 건너지 않아야 하는지. (Seam 으로 마크했거나, Sharp 로 마크한 엣지)"""
+    """이 엣지가 마크 엣지(퍼짐을 멈추게 하는 엣지)인지. Seam 으로 마크했거나 Sharp 로 마크한 엣지."""
     return (stop_seam and e.seam) or (stop_sharp and not e.smooth)
 
 
-def spread(bm, seed_verts, stop_seam=True, stop_sharp=True):
+def grow(bm, seed_verts, steps=1, stop_seam=True, stop_sharp=True, face_step=True):
     """
-    seed_verts 에서 퍼진 (면 집합, 엣지 집합, 버텍스 집합, 막힌 엣지 집합).
-    막힌 엣지: 퍼지는 도중 만났지만 건너지 않은 마크 엣지. (선택에는 포함된다)
+    seed_verts 에서 steps 단계만큼 퍼진 결과: (버텍스 집합, 엣지 집합, 면 집합, 막힌 엣지 집합, 실제로 퍼진 단계 수)
+    steps = 0 이면 끝까지. 막힌 엣지: 선택에 포함된 마크 엣지(퍼짐이 멈춘 경계).
     """
-    seed_verts = [v for v in seed_verts if not v.hide]
-    faces, stack = set(), []
-    for v in seed_verts:
-        for f in v.link_faces:
-            if not f.hide and f not in faces:
-                faces.add(f)
-                stack.append(f)
+    seeds = [v for v in seed_verts if not v.hide]
+    selected = set(seeds)
+    frontier = set(seeds)
     blocked = set()
-    while stack:
-        f = stack.pop()
-        for e in f.edges:
-            if e.hide:
-                continue
-            if is_blocking(e, stop_seam, stop_sharp):
-                blocked.add(e)
-                continue
-            for g in e.link_faces:
-                if not g.hide and g not in faces:
-                    faces.add(g)
-                    stack.append(g)
+    end_cache = {}
 
-    edges = {e for f in faces for e in f.edges if not e.hide}
-    verts = {v for f in faces for v in f.verts if not v.hide}
-    verts.update(seed_verts)
+    def is_end(v):
+        """마크 엣지에 닿은 버텍스(퍼짐의 끝점)."""
+        if v not in end_cache:
+            end_cache[v] = any(is_blocking(e, stop_seam, stop_sharp) for e in v.link_edges if not e.hide)
+        return end_cache[v]
 
-    # 면이 없는 엣지(와이어): 시작 버텍스와 퍼진 영역의 버텍스에서 같은 규칙으로 따라간다.
-    vstack = list(verts)
-    seen_v = set(verts)
-    while vstack:
-        v = vstack.pop()
+    level = 0
+    while frontier and (steps == 0 or level < steps):
+        reached = set()
+        for v in frontier:
+            for e in v.link_edges:
+                if e.hide:
+                    continue
+                if is_blocking(e, stop_seam, stop_sharp):
+                    blocked.add(e)
+                reached.add(e.other_vert(v))
+            if face_step:
+                for f in v.link_faces:
+                    if not f.hide:
+                        reached.update(f.verts)
+        new = {u for u in reached if not u.hide} - selected
+        if not new:
+            break
+        selected |= new
+        frontier = {u for u in new if not is_end(u)}
+        level += 1
+
+    # 선택한 버텍스로 이루어진 엣지와 면. (Blender 가 버텍스 모드에서 선택을 이어 주는 것과 같다)
+    edges, faces = set(), set()
+    for v in selected:
         for e in v.link_edges:
-            if e.hide or e.link_faces:
-                continue
-            if is_blocking(e, stop_seam, stop_sharp):
-                blocked.add(e)
+            if not e.hide and e.other_vert(v) in selected:
                 edges.add(e)
-                verts.add(e.other_vert(v))      # 마크 엣지는 선택하되 그 너머로는 가지 않는다
-                continue
-            edges.add(e)
-            w = e.other_vert(v)
-            verts.add(w)
-            if w not in seen_v:
-                seen_v.add(w)
-                vstack.append(w)
-    return faces, edges, verts, blocked
+        for f in v.link_faces:
+            if not f.hide and f not in faces and all(x in selected for x in f.verts):
+                faces.add(f)
+    # 마크 엣지 중 선택에 포함된 것(퍼짐이 멈춘 경계). 끝점은 퍼지지 않으므로 퍼지는 도중이 아니라 결과에서 센다.
+    blocked |= {e for e in edges if is_blocking(e, stop_seam, stop_sharp)}
+    return selected, edges, faces, blocked, level

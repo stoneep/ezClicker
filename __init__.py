@@ -17,8 +17,8 @@ Mirror Loop Select
   edge_shape.py  [엣지] 같은 모양의 엣지 루프 찾기 (톱니바퀴 림 윤곽, 푸리에 진폭 비교)
   edge_ops.py    [엣지] Alt+클릭 루프 선택, Alt/Ctrl+휠 확장, 같은 모양 엣지 루프 오퍼레이터
 
-  net_spread.py  [메시] 버텍스에서 그물망처럼 퍼뜨리기 (Seam/Sharp 마크 엣지까지만)
-  net_ops.py     [메시] Alt+우클릭 버텍스에서 퍼뜨려 선택 오퍼레이터
+  net_spread.py  [메시] 버텍스에서 한 칸씩 이어 붙여 선택 (Select More 원리 + Seam/Sharp 마크에서 멈춤)
+  net_ops.py     [메시] Alt+우클릭 버텍스에서 퍼뜨려 선택, Alt+휠 한 칸 더/덜 오퍼레이터
   face_core.py   [면]   사각형 면 위상 헬퍼, 루프 사이의 면 모으기
   face_shape.py  [면]   평평한 면 영역의 모양 비교 (같은 모양 찾기)
   face_patch.py  [면]   매끈한 덩어리의 경계 엣지 루프 비교 (베벨·둥근 모양, 폴리 수가 달라도 같은 모양 찾기)
