@@ -199,6 +199,31 @@ def patch_seed_shapes(bm, seed_faces, delimit_angle=DEFAULT_DELIMIT):
     return out
 
 
+def diagnose_seed(bm, seed_faces, delimit_angle=DEFAULT_DELIMIT):
+    """
+    기준 면의 덩어리를 읽지 못했을 때 사용자에게 보여줄 원인 설명. (읽을 수 있으면 None)
+    덩어리 면 수, 전체 면 수, 현재 끊는 각도를 함께 알려 준다.
+    """
+    bm.normal_update()
+    wanted = set(seed_faces)
+    total = sum(1 for f in bm.faces if not f.hide)
+    deg = math.degrees(delimit_angle)
+    for patch in smooth_patches(bm, delimit_angle):
+        if not (patch & wanted) or patch_shape(patch) is not None:
+            continue
+        n = len(patch)
+        head = "덩어리가 면 %d개(전체 %d개 중)" % (n, total)
+        edges = {e for f in patch for e in f.edges}
+        if not any(sum(1 for g in e.link_faces if g in patch) == 1 for e in edges):
+            return (head + "인데 경계가 없습니다. 메시가 매끈하게 닫혀 있어서 덩어리가 끊기지 않았습니다. "
+                    "'덩어리 끊는 각도'(현재 %.0f°)를 낮춰 보세요" % deg)
+        if boundary_loops(patch) is None:
+            return (head + "인데 경계가 한 줄로 이어지지 않습니다 (한 점에서 스스로 맞닿거나 갈라짐). "
+                    "'덩어리 끊는 각도'(현재 %.0f°)를 바꿔 보세요" % deg)
+        return head + "인데 경계 크기가 0 입니다 (길이가 0인 엣지뿐)"
+    return None
+
+
 def similar_patches(bm, shapes, delimit_angle=DEFAULT_DELIMIT, tol=DEFAULT_CURVE_TOL, scale_invariant=False):
     """bm 에서 shapes 중 하나와 같은 모양의 덩어리들을 face 집합 리스트로 돌려준다. (씨앗 자신의 덩어리도 포함된다.)"""
     bm.normal_update()

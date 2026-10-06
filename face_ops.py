@@ -48,7 +48,7 @@ from .common import (adjust_valid, ensure_tables, face_only_mode, get_mirror_axe
 from .edge_core import find_mirror_edges, walk_loop
 from .edge_range import ADJUST_LENGTH_MIN, ADJUST_STEP_MAX, find_between
 from .face_core import order_strip, strip_faces, strip_rails, strip_region
-from .face_patch import patch_seed_shapes, similar_patches
+from .face_patch import diagnose_seed, patch_seed_shapes, similar_patches
 from .face_shape import flat_island, island_shape, similar_islands
 from .settings import extension_enabled, geometry_options, similar_options, use_mirror_extension
 
@@ -460,7 +460,14 @@ class MESH_OT_mirror_face_similar(bpy.types.Operator):
                 if idx:
                     shapes.extend(patch_seed_shapes(bm, [bm.faces[i] for i in idx], opt.patch_angle))
             if not shapes:
-                self.report({'WARNING'}, "이 면의 경계 루프를 읽을 수 없습니다 (경계가 한 줄로 이어지지 않거나 크기가 0)")
+                why = None
+                for ob, bm in zip(objs, bms):
+                    idx = [i for i in seed_idx.get(ob.name, ()) if i < len(bm.faces)]
+                    if idx:
+                        why = diagnose_seed(bm, [bm.faces[i] for i in idx], opt.patch_angle)
+                        if why:
+                            break
+                self.report({'WARNING'}, "이 면의 경계 루프를 읽을 수 없습니다. " + (why or "경계가 한 줄로 이어지지 않거나 크기가 0 입니다"))
                 return {'CANCELLED'}
 
         # 3) 모든 편집 중인 오브젝트에서 같은 모양 찾기
