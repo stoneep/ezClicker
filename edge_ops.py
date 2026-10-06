@@ -69,7 +69,9 @@ def run_selection(context, p):
     if ob is None or p.seed_edge < 0:
         return 'CANCELLED', "Alt+클릭으로 루프를 선택해야 이 패널을 쓸 수 있습니다"
 
-    snap = snapshot_selection([ob])        # 이 선택을 적용하기 전의 선택. 고정 패널이 값을 바꿀 때마다 여기서 다시 시작한다.
+    # 이 선택을 적용하기 전의 선택. 고정 패널이 값을 바꿀 때마다 여기서 다시 시작한다.
+    # 교체 선택(replace)이면 이전 선택을 버리므로 기록하지 않는다. (큰 메시에서 가장 비싼 부분)
+    snap = None if p.replace else snapshot_selection([ob])
     if p.replace:
         bpy.ops.mesh.select_all(action='DESELECT')
     bm = bmesh.from_edit_mesh(ob.data)    # 위 연산 뒤에는 다시 받는다
@@ -221,13 +223,19 @@ class MESH_OT_mirror_loop_select(bpy.types.Operator):
         objs = list(context.objects_in_mode_unique_data)
         mouse = Vector((event.mouse_region_x, event.mouse_region_y))
 
-        # 1) 기존 선택 상태 기록
-        snap = snapshot_selection(objs)
-        before = {}
-        for ob in objs:
-            bm = bmesh.from_edit_mesh(ob.data)
-            bm.edges.index_update()
-            before[ob] = {e.index for e in bm.edges if e.select}
+        # 일반 클릭(교체 선택)은 Alt+A 로 비운 뒤 클릭한 것과 같게 취급한다.
+        # (이미 선택돼 있던 엣지를 다시 클릭해도 '해제'로 오인하지 않도록)
+        plain = not (self.extend or self.toggle or self.deselect)
+
+        # 1) 기존 선택 상태 기록. 교체 선택은 이전 선택을 버리므로 기록할 필요가 없다.
+        #    (메시가 크면 모든 버텍스·엣지·면을 훑는 이 기록이 클릭 시간의 대부분이다)
+        snap, before = None, {}
+        if not plain:
+            snap = snapshot_selection(objs)
+            for ob in objs:
+                bm = bmesh.from_edit_mesh(ob.data)
+                bm.edges.index_update()
+                before[ob] = {e.index for e in bm.edges if e.select}
 
         # 2) 기본 루프 선택 실행 (클릭 위치 판정은 Blender 기본 기능 사용)
         #    기본 루프가 바꾼 엣지 중 '클릭한 엣지'를 씨앗으로 쓴다.
@@ -238,9 +246,6 @@ class MESH_OT_mirror_loop_select(bpy.types.Operator):
         if 'FINISHED' not in result:
             return {'CANCELLED'}
 
-        # 일반 클릭(교체 선택)은 Alt+A 로 비운 뒤 클릭한 것과 같게 취급한다.
-        # (이미 선택돼 있던 엣지를 다시 클릭해도 '해제'로 오인하지 않도록)
-        plain = not (self.extend or self.toggle or self.deselect)
         hit = self._find_seed(context, objs, before, plain, mouse)
         if hit is None:
             return {'FINISHED'}
@@ -248,7 +253,8 @@ class MESH_OT_mirror_loop_select(bpy.types.Operator):
         # 3) 기본 루프가 바꾼 선택은 되돌리고, 씨앗과 기본 루프가 고른 엣지를 기억해서 execute 가 모든 걸 다시 계산하게 한다.
         #    기본 루프가 우리 루프보다 더 가는 곳(불리언 교차선 등)도 예전처럼 함께 선택한다.
         #    (패널에서 값을 바꿔 다시 실행할 때와 처음 실행이 같은 결과를 내도록)
-        restore_selection(objs, snap)
+        if snap is not None:
+            restore_selection(objs, snap)
         ob, self.seed_edge, self.do_select, default_edges = hit
         self.seed_object = ob.name
         self.default_edges = ",".join(str(i) for i in sorted(default_edges))
@@ -454,7 +460,8 @@ class MESH_OT_mirror_loop_adjust(bpy.types.Operator):
             p.use_ring = False        # 링 상태에서 폭/길이를 만지면 루프로 돌아와서 적용한다
 
         ob = context.edit_object
-        restore_selection([ob], adj['snap'])
+        if adj['snap'] is not None:
+            restore_selection([ob], adj['snap'])
         status, msg = run_selection(context, p)
         if msg:
             self.report({'WARNING'}, msg)
