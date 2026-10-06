@@ -46,11 +46,20 @@ def expand_sides(context, ob, bm, seed, st, steps_up, steps_down):
     """위/아래 값만큼 옆 루프를 더 선택한다. 휠 확장과 같은 상태(lo/hi)로 남겨서 휠을 이어 쓸 수 있다."""
     if not (steps_up or steps_down):
         return
-    st['faces'][0] = init_faces(context, ob, seed)
     lo, hi = build_sides(bm, st, steps_up, steps_down)
     if (lo, hi) != (0, 0):
         apply_range(bm, st, lo, hi)
         st['lo'], st['hi'] = lo, hi
+
+
+def stored_faces0(bm, seed, faces0):
+    """기억해 둔 (뒤쪽 면, 앞쪽 면) 인덱스가 아직 이 씨앗의 양쪽 면이면 그대로 돌려준다. 아니면 None."""
+    if not faces0:
+        return None
+    ids = {f.index for f in seed.link_faces if not f.hide}
+    if all(i is None or i in ids for i in faces0) and any(i is not None for i in faces0):
+        return tuple(faces0)
+    return None
 
 
 def run_selection(context, p):
@@ -135,6 +144,11 @@ def run_selection(context, p):
         core = {e.index for e in loop} | {e.index for e in mirror}
         st = new_wheel_state(ob, bm, seed, core, axes, p.threshold, cos_limit, dih, full_idxs)
         st['keep'], st['ref_dir'] = keep, ref_dir
+        # 위/아래(+쪽/-쪽)는 '클릭한 순간의 화면'으로 한 번만 정해 기억한다. 사이드바 패널에서 다시 계산할 때는
+        # 3D 뷰의 화면 정보가 없어(패널 영역) 화면 기준으로 다시 정하면 방향이 제멋대로 정해지기 때문이다.
+        faces0 = stored_faces0(bm, seed, getattr(p, 'faces0', None)) or init_faces(context, ob, seed)
+        st['faces'][0] = faces0
+        params['faces0'] = faces0
         expand_sides(context, ob, bm, seed, st, p.steps_up, p.steps_down)
         if use_wheel:
             state.set_wheel(st)
