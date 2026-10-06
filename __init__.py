@@ -17,6 +17,7 @@ Mirror Loop Select
 
   face_core.py   [면]   사각형 면 위상 헬퍼, 루프 사이의 면 모으기
   face_shape.py  [면]   평평한 면 영역의 모양 비교 (같은 모양 찾기)
+  face_patch.py  [면]   매끈한 덩어리의 경계 엣지 루프 비교 (베벨·둥근 모양, 폴리 수가 달라도 같은 모양 찾기)
   overlay.py     면 모드 사이 선택의 시작 루프(대기 중) 임시 색 표시
   face_ops.py    [면]   Ctrl+Alt+클릭 사이 전부 / Shift+Alt+클릭 사이 루프만 / Alt+더블클릭 같은 모양 면 선택 오퍼레이터
 
@@ -44,13 +45,13 @@ bl_info = {
 # (순서는 의존 방향을 따른다: 아래쪽 모듈이 먼저)
 if "bpy" in locals():
     import importlib
-    from . import (state, common, settings, face_core, face_shape, edge_core, edge_range,
+    from . import (state, common, face_shape, face_patch, settings, face_core, edge_core, edge_range,
                    edge_ops, face_ops, prefs, ui, overlay)
-    for _m in (state, common, settings, face_core, face_shape, edge_core, edge_range,
+    for _m in (state, common, face_shape, face_patch, settings, face_core, edge_core, edge_range,
                edge_ops, face_ops, prefs, ui, overlay):
         importlib.reload(_m)
 else:
-    from . import (state, common, settings, face_core, face_shape, edge_core, edge_range,  # noqa: F401
+    from . import (state, common, face_shape, face_patch, settings, face_core, edge_core, edge_range,  # noqa: F401
                    edge_ops, face_ops, prefs, ui, overlay)
 
 import bpy

@@ -48,6 +48,7 @@ from .common import (adjust_valid, ensure_tables, face_only_mode, get_mirror_axe
 from .edge_core import find_mirror_edges, walk_loop
 from .edge_range import ADJUST_LENGTH_MIN, ADJUST_STEP_MAX, find_between
 from .face_core import order_strip, strip_faces, strip_rails, strip_region
+from .face_patch import patch_seed_shapes, similar_patches
 from .face_shape import flat_island, island_shape, similar_islands
 from .settings import extension_enabled, geometry_options, similar_options, use_mirror_extension
 
@@ -433,22 +434,37 @@ class MESH_OT_mirror_face_similar(bpy.types.Operator):
             self.report({'WARNING'}, "기준이 될 면을 선택하거나 Alt+더블클릭으로 면을 가리키세요")
             return {'CANCELLED'}
 
-        # 2) 기준 면의 모양 (같은 영역에 속한 면은 한 번만)
-        shapes, seen = [], set()
-        for f in seed_faces:
-            if f in seen:
-                continue
-            isl = flat_island(f, opt.flat_angle) if opt.use_island else {f}
-            seen |= isl
-            shp = island_shape(isl, opt.scale_invariant)
-            if shp is not None:
-                shapes.append(shp)
-        if not shapes:
-            self.report({'WARNING'}, "이 면의 외곽선을 읽을 수 없습니다 (점으로만 맞닿는 면이거나 길이가 0인 변)")
-            return {'CANCELLED'}
+        # 2) 기준 면의 모양
+        patch_mode = opt.mode == 'PATCH'
+        shapes = []
+        if not patch_mode:
+            # 평평한 영역 외곽선: 같은 영역에 속한 면은 한 번만
+            seen = set()
+            for f in seed_faces:
+                if f in seen:
+                    continue
+                isl = flat_island(f, opt.flat_angle) if opt.use_island else {f}
+                seen |= isl
+                shp = island_shape(isl, opt.scale_invariant)
+                if shp is not None:
+                    shapes.append(shp)
+            if not shapes:
+                self.report({'WARNING'}, "이 면의 외곽선을 읽을 수 없습니다 (점으로만 맞닿는 면이거나 길이가 0인 변)")
+                return {'CANCELLED'}
+            del seen
+        if patch_mode:
+            # 경계 엣지 루프 방식: 기준 면이 속한 덩어리의 경계 곡선을 읽는다.
+            shapes = []
+            for ob, bm in zip(objs, bms):
+                idx = [i for i in seed_idx.get(ob.name, ()) if i < len(bm.faces)]
+                if idx:
+                    shapes.extend(patch_seed_shapes(bm, [bm.faces[i] for i in idx], opt.patch_angle))
+            if not shapes:
+                self.report({'WARNING'}, "이 면의 경계 루프를 읽을 수 없습니다 (경계가 한 줄로 이어지지 않거나 크기가 0)")
+                return {'CANCELLED'}
 
         # 3) 모든 편집 중인 오브젝트에서 같은 모양 찾기
-        del seed_faces, seen
+        del seed_faces
         if not opt.extend:
             bpy.ops.mesh.select_all(action='DESELECT')
         regions = faces_total = 0
@@ -457,8 +473,11 @@ class MESH_OT_mirror_face_similar(bpy.types.Operator):
             bm = bmesh.from_edit_mesh(ob.data)
             bm.faces.ensure_lookup_table()
             bm.normal_update()
-            found = similar_islands(bm, shapes, opt.flat_angle, opt.length_tolerance,
-                                    opt.angle_tolerance, opt.scale_invariant, opt.use_island)
+            if patch_mode:
+                found = similar_patches(bm, shapes, opt.patch_angle, opt.curve_tolerance, opt.scale_invariant)
+            else:
+                found = similar_islands(bm, shapes, opt.flat_angle, opt.length_tolerance,
+                                        opt.angle_tolerance, opt.scale_invariant, opt.use_island)
             idx = set()
             for isl in found:
                 for f in isl:

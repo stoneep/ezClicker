@@ -285,14 +285,21 @@ class VIEW3D_PT_mirror_loop_similar(bpy.types.Panel):
             layout.label(text="같은 모양 %d곳 (면 %d개)" % (info['regions'], info['faces']), icon='CHECKMARK')
         else:
             layout.label(text="면을 선택하거나 Alt+더블클릭하세요")
+        layout.prop(s, "similar_mode", text="")
         col = layout.column(align=True)
         col.prop(s, "similar_extend")
         col.prop(s, "similar_scale_invariant")
-        col.prop(s, "similar_use_island")
-        col = layout.column(align=True)
-        col.prop(s, "similar_length_tolerance")
-        col.prop(s, "similar_angle_tolerance")
-        col.prop(s, "similar_flat_angle")
+        if s.similar_mode == 'PATCH':
+            # 경계 엣지 루프 방식: 덩어리를 끊는 각도와 곡선 허용 오차
+            col = layout.column(align=True)
+            col.prop(s, "similar_patch_angle")
+            col.prop(s, "similar_curve_tolerance")
+        else:
+            col.prop(s, "similar_use_island")
+            col = layout.column(align=True)
+            col.prop(s, "similar_length_tolerance")
+            col.prop(s, "similar_angle_tolerance")
+            col.prop(s, "similar_flat_angle")
         layout.label(text="옵션을 바꾸면 같은 기준 면으로 다시 찾습니다")
 
 

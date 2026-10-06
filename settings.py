@@ -20,6 +20,7 @@ import bpy
 from bpy.props import BoolProperty, EnumProperty, FloatProperty, IntProperty
 
 from . import state
+from .face_patch import DEFAULT_CURVE_TOL, DEFAULT_DELIMIT
 from .face_shape import DEFAULT_ANGLE_TOL, DEFAULT_FLAT, DEFAULT_LEN_TOL
 
 
@@ -96,7 +97,34 @@ def _on_similar_update(self, context):
         pass
 
 
+SIMILAR_MODES = (
+    ('FLAT', "평평한 영역 외곽선",
+     "이웃한 평평한 면들을 한 덩어리로 보고 외곽선 모양(변 길이, 꺾임 각)을 비교한다. 기어처럼 뾰족한 평면 모양에 정확하다", 'MESH_PLANE', 0),
+    ('PATCH', "경계 엣지 루프 (둥근 모양·해상도 달라도)",
+     "각도로 끊어 매끈하게 이어진 면들(베벨·둥근 면 포함)을 한 덩어리로 보고, 경계 엣지 루프를 같은 간격으로 다시 찍어 비교한다. "
+     "내부 면 개수와 원을 몇 조각으로 나눴는지는 보지 않는다. 베벨 준 나사 머리처럼 크기별로 폴리 수가 다른 부품용", 'MESH_CIRCLE', 1),
+)
+
+
 class MLS_Settings(bpy.types.PropertyGroup):
+    similar_mode: EnumProperty(
+        name="비교 기준",
+        description="무엇을 보고 같은 모양인지 판단할지",
+        items=SIMILAR_MODES, default='FLAT', update=_on_similar_update,
+    )
+    similar_patch_angle: FloatProperty(
+        name="덩어리 끊는 각도",
+        description="이웃한 면의 각도 차이가 이보다 크면 다른 덩어리로 나눈다. "
+                    "베벨 조각 하나의 꺾임보다는 크게, 바닥과 만나는 모서리보다는 작게 잡는다",
+        default=DEFAULT_DELIMIT, min=math.radians(5.0), max=math.radians(89.0), subtype='ANGLE',
+        update=_on_similar_update,
+    )
+    similar_curve_tolerance: FloatProperty(
+        name="곡선 허용 오차",
+        description="경계 곡선을 비교할 때 허용하는 차이(평균 반지름 대비). 원을 적게 나눈 쪽은 다각형이라 "
+                    "크면 클수록 폴리 수가 많이 다른 것도 같다고 본다",
+        default=DEFAULT_CURVE_TOL, min=0.005, max=0.3, precision=3, update=_on_similar_update,
+    )
     similar_extend: BoolProperty(
         name="기존 선택에 추가",
         description="기존 선택을 지우지 않고 찾은 면을 더한다",
@@ -190,11 +218,13 @@ def similar_options(context):
     s = get_settings(context)
     if s is None:
         return SimpleNamespace(extend=False, scale_invariant=False, use_island=True, length_tolerance=DEFAULT_LEN_TOL,
-                               angle_tolerance=DEFAULT_ANGLE_TOL, flat_angle=DEFAULT_FLAT)
+                               angle_tolerance=DEFAULT_ANGLE_TOL, flat_angle=DEFAULT_FLAT, mode='FLAT',
+                               patch_angle=DEFAULT_DELIMIT, curve_tolerance=DEFAULT_CURVE_TOL)
     return SimpleNamespace(
         extend=s.similar_extend, scale_invariant=s.similar_scale_invariant, use_island=s.similar_use_island,
         length_tolerance=s.similar_length_tolerance, angle_tolerance=s.similar_angle_tolerance,
-        flat_angle=s.similar_flat_angle)
+        flat_angle=s.similar_flat_angle, mode=s.similar_mode, patch_angle=s.similar_patch_angle,
+        curve_tolerance=s.similar_curve_tolerance)
 
 
 def extension_enabled(context):
