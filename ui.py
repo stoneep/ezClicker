@@ -215,6 +215,31 @@ class VIEW3D_PT_mirror_loop_adjust(bpy.types.Panel):
         draw_adjust(self.layout, context)
 
 
+class VIEW3D_PT_mirror_loop_adjust_options(bpy.types.Panel):
+    """루프를 따라가는 규칙. (예전에는 Alt+클릭 직후 왼쪽 아래 '마지막 작업' 패널에 있던 옵션)
+    모든 루프 선택이 같은 값을 쓰므로 다른 작업의 옵션과 섞이지 않는다."""
+    bl_label = "루프 따라가기 옵션"
+    bl_idname = "VIEW3D_PT_mirror_loop_adjust_options"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = "Mirror Loop"
+    bl_parent_id = "VIEW3D_PT_mirror_loop_adjust"
+    bl_options = {'DEFAULT_CLOSED'}
+
+    @classmethod
+    def poll(cls, context):
+        return context.mode == 'EDIT_MESH'
+
+    def draw(self, context):
+        s = get_settings(context)
+        if s is None:
+            return
+        col = self.layout.column(align=True)
+        col.prop(s, "max_turn_angle")
+        col.prop(s, "use_dihedral")
+        self.layout.label(text="바꾸면 방금 고른 루프를 다시 계산합니다")
+
+
 class MESH_MT_mirror_loop_level(bpy.types.Menu):
     bl_label = "Mirror Loop Select"
     bl_idname = "MESH_MT_mirror_loop_level"
@@ -294,4 +319,5 @@ classes = (
     MESH_MT_mirror_loop_level,
     VIEW3D_PT_mirror_loop_select,
     VIEW3D_PT_mirror_loop_adjust,
+    VIEW3D_PT_mirror_loop_adjust_options,
 )

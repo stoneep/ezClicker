@@ -14,8 +14,10 @@ settings.py — 확장 단계 설정.
 그 옵션을 패널에 그리는 코드는 해당 기능 모듈(edge_ops / face_ops)의 draw_settings 에 둔다.
 """
 
+import math
+
 import bpy
-from bpy.props import BoolProperty, EnumProperty, IntProperty
+from bpy.props import BoolProperty, EnumProperty, FloatProperty, IntProperty
 
 from . import state
 
@@ -66,7 +68,37 @@ def _adjust_setter(target, key):
     return set_
 
 
+DEFAULT_MAX_ANGLE = math.radians(60.0)
+
+
+def _on_geometry_update(self, context):
+    """루프를 따라가는 규칙(최대 꺾임 각도, 다이헤드럴)이 바뀌면 방금 고른 루프를 새 규칙으로 다시 고른다."""
+    from .common import adjust_valid          # common 은 settings 를 가져오지 않지만, 로드 순서를 단순하게 두려고 함수 안에서
+    adj = state.adjust
+    if adj is None or adj.get('mode', 'EDGE') != 'EDGE' or not adjust_valid(context):
+        state.reset_wheel()
+        return
+    try:
+        bpy.ops.mesh.mirror_loop_adjust('EXEC_DEFAULT', target='REFRESH')
+    except RuntimeError:
+        pass
+
+
 class MLS_Settings(bpy.types.PropertyGroup):
+    max_turn_angle: FloatProperty(
+        name="최대 꺾임 각도",
+        description="극점/삼각형에서 루프가 꺾여도 계속 진행할 최대 각도 (클수록 더 멀리 감). "
+                    "바꾸면 방금 고른 루프를 다시 계산한다",
+        default=DEFAULT_MAX_ANGLE, min=0.0, max=math.radians(120.0), subtype='ANGLE',
+        update=_on_geometry_update,
+    )
+    use_dihedral: BoolProperty(
+        name="다이헤드럴 사용",
+        description="면 사이 각도(다이헤드럴)를 보조 기준으로 써서 능선·로우폴리에서 루프가 끊기거나 새는 것을 줄인다. "
+                    "바꾸면 방금 고른 루프를 다시 계산한다",
+        default=True,
+        update=_on_geometry_update,
+    )
     adjust_up: IntProperty(
         name="폭: 위쪽 루프",
         description="클릭한 루프에서 화면 위쪽으로 나란한 루프를 몇 줄 더 선택할지 (드래그/화살표/입력)",
@@ -102,6 +134,12 @@ class MLS_Settings(bpy.types.PropertyGroup):
 
 def get_settings(context):
     return getattr(context.window_manager, "mls_settings", None)
+
+
+def geometry_options(context):
+    """루프 걷기 규칙: (최대 꺾임 각도, 다이헤드럴 사용). 설정이 아직 없으면 기본값."""
+    s = get_settings(context)
+    return (DEFAULT_MAX_ANGLE, True) if s is None else (s.max_turn_angle, s.use_dihedral)
 
 
 def extension_enabled(context):

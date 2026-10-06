@@ -6,8 +6,8 @@ edge_ops.py — [엣지] 오퍼레이터와 키맵.
   Alt+휠                  : 위·아래 루프 동시 확장/축소          -> MESH_OT_mirror_loop_step
   Ctrl+휠                 : 한 방향 확장/축소                    -> MESH_OT_mirror_loop_step
 
-루프 선택 직후 왼쪽 아래에 Blender 의 '마지막 작업 조정' 패널이 뜬다. 거기서 '위쪽/아래쪽 루프'를 +/- 로 조절하면
-휠 확장과 같은 결과를 얻는다. (Alt+휠을 안 쓰는 사람이 마우스만으로 범위를 조절하는 용도)
+왼쪽 아래 '마지막 작업' 패널은 쓰지 않는다. 폭/길이/링과 최대 꺾임 각도·다이헤드럴은 모두 N 패널에 있다.
+(루프 따라가기 옵션은 설정(settings.MLS_Settings)에 두어, 다른 작업의 옵션과 섞이거나 충돌하지 않는다.)
 
 사이드바(N)의 'Mirror Loop' 탭(고정 패널, 임시 키 Alt+1)에서도 같은 폭/길이/링 값을 +/- 로 조절한다.
 패널은 닫기 전까지 열려 있고 휠 확장과 숫자가 서로 맞는다.     -> MESH_OT_mirror_loop_adjust, MESH_OT_mirror_loop_panel
@@ -35,7 +35,7 @@ from .common import (adjust_valid, ensure_tables, face_only_mode, get_mirror_axe
 from .edge_range import (ADJUST_LENGTH_MIN, ADJUST_STEP_MAX, apply_range, build_sides, new_wheel_state,
                          ring_edges, selected_loop, state_valid, step_both_sides, step_one_side)
 from .face_core import init_faces
-from .settings import extension_enabled, get_settings, use_mirror_extension
+from .settings import extension_enabled, geometry_options, get_settings, use_mirror_extension
 
 
 def expand_sides(context, ob, bm, seed, st, steps_up, steps_down):
@@ -54,7 +54,8 @@ def run_selection(context, p):
     루프 선택의 본체. 오퍼레이터(execute)와 고정 패널(MESH_OT_mirror_loop_adjust)이 같이 쓴다.
 
     p : 값을 담은 객체. 필요한 속성 — seed_object, seed_edge, default_edges, do_select, replace, use_ring,
-        steps_up, steps_down, length_adjust, max_angle, threshold, use_dihedral
+        steps_up, steps_down, length_adjust, threshold
+        (최대 꺾임 각도와 다이헤드럴은 설정(N 패널)에서 읽는다)
     반환: ('FINISHED' 또는 'CANCELLED', 경고 메시지 또는 None)
     선택에 성공하면 앵커, 휠 확장 상태, 고정 패널용 조절 상태(state.adjust)를 함께 갱신한다.
     """
@@ -74,8 +75,8 @@ def run_selection(context, p):
 
     settings = get_settings(context)
     use_wheel = settings is None or settings.use_wheel
-    cos_limit = math.cos(p.max_angle)
-    dih = p.use_dihedral
+    max_angle, dih = geometry_options(context)
+    cos_limit = math.cos(max_angle)
     if dih:
         bm.normal_update()   # 다이헤드럴 계산에 쓰는 면 법선을 최신으로
 
@@ -84,7 +85,7 @@ def run_selection(context, p):
         'seed_object': p.seed_object, 'seed_edge': p.seed_edge, 'default_edges': p.default_edges,
         'do_select': p.do_select, 'replace': p.replace, 'use_ring': p.use_ring,
         'steps_up': p.steps_up, 'steps_down': p.steps_down, 'length_adjust': p.length_adjust,
-        'max_angle': p.max_angle, 'threshold': p.threshold, 'use_dihedral': p.use_dihedral,
+        'threshold': p.threshold,
     }
 
     # 링: 루프가 아니라 클릭한 엣지와 나란히 쌓인 엣지 한 줄. 폭/길이/미러/기본 루프 결과는 쓰지 않는다.
@@ -139,28 +140,18 @@ class MESH_OT_mirror_loop_select(bpy.types.Operator):
     """루프 선택 + 극점에서 멈추지 않고 끝까지 + 미러 축에서 끊긴 반대편까지"""
     bl_idname = "mesh.mirror_loop_select"
     bl_label = "Mirror Loop Select"
-    bl_options = {'REGISTER', 'UNDO'}
+    bl_options = {'UNDO'}      # REGISTER 를 쓰지 않아 왼쪽 아래 '마지막 작업' 패널이 뜨지 않는다. 옵션은 모두 N 패널에 있다.
 
     extend: BoolProperty(name="Extend", default=False)
     deselect: BoolProperty(name="Deselect", default=False)
     toggle: BoolProperty(name="Toggle", default=False)
-    max_angle: FloatProperty(
-        name="Max Turn Angle",
-        description="극점/삼각형에서 루프가 꺾여도 계속 진행할 최대 각도 (클수록 더 멀리 감)",
-        default=math.radians(60.0), min=0.0, max=math.radians(120.0),
-        subtype='ANGLE',
-    )
     threshold: FloatProperty(
         name="Mirror Threshold",
         description="버텍스가 미러 평면 위에 있다고 보는 거리 허용 오차",
         default=1e-4, min=0.0, precision=6,
     )
-    use_dihedral: BoolProperty(
-        name="Use Dihedral",
-        description="면 사이 각도(다이헤드럴)를 보조 기준으로 써서 능선·로우폴리에서 루프가 끊기거나 새는 것을 줄인다",
-        default=True,
-    )
-    # 선택 직후 왼쪽 아래에 뜨는 '마지막 작업 조정' 패널에서 +/- 로 조절한다. (휠 확장과 같은 동작)
+    # 폭/길이/링은 사이드바(N) 고정 패널에서 조절한다. (값은 mesh.mirror_loop_adjust 가 바꾼다)
+    # 아래 속성은 프로그램(테스트, 매크로)에서 직접 부를 때의 입력이다. 왼쪽 아래 '마지막 작업' 패널은 쓰지 않는다.
     use_ring: BoolProperty(
         name="링 (Ring)",
         description="루프 대신 링을 선택한다: 클릭한 엣지와 나란히 쌓인 엣지 한 줄(사각형 면을 가로질러 맞은편 엣지를 계속 따라감). "
@@ -197,22 +188,9 @@ class MESH_OT_mirror_loop_select(bpy.types.Operator):
         return (context.mode == 'EDIT_MESH' and extension_enabled(context)
                 and not face_only_mode(context))
 
-    def draw(self, context):
-        layout = self.layout
-        if self.do_select:
-            layout.prop(self, "use_ring")
-            col = layout.column(align=True)
-            col.enabled = not self.use_ring         # 링은 폭/길이를 쓰지 않는다
-            col.prop(self, "steps_up")
-            col.prop(self, "steps_down")
-            col.prop(self, "length_adjust")
-            layout.separator()
-        layout.prop(self, "max_angle")
-        layout.prop(self, "use_dihedral")
-
     def _find_seed(self, context, objs, before, plain, mouse):
         """기본 루프 선택이 바꾼 엣지 중 '클릭한 엣지'를 찾는다: (오브젝트, 씨앗 엣지 인덱스, 선택 여부, 바뀐 엣지들) 또는 None."""
-        dih = self.use_dihedral
+        dih = geometry_options(context)[1]
         for ob in objs:
             bm = bmesh.from_edit_mesh(ob.data)
             bm.edges.ensure_lookup_table()
@@ -353,6 +331,7 @@ class MESH_OT_mirror_loop_adjust(bpy.types.Operator):
             ('LENGTH', "길이", "루프를 따라가는 엣지 수를 줄이거나(-) 되돌린다(+)"),
             ('RING', "링", "루프 대신 링(나란히 쌓인 엣지 한 줄)으로 바꾸거나 되돌린다"),
             ('RESET', "초기화", "폭과 길이를 처음 클릭한 상태(루프 전체)로 되돌린다"),
+            ('REFRESH', "다시 계산", "값은 그대로 두고 현재 설정(최대 꺾임 각도 등)으로 다시 고른다"),
         ),
         default='UP',
     )
@@ -387,9 +366,9 @@ class MESH_OT_mirror_loop_adjust(bpy.types.Operator):
             p.length_adjust = min(max(want, lowest), 0)
         elif t == 'RING':
             p.use_ring = not p.use_ring
-        else:
+        elif t == 'RESET':
             p.steps_up = p.steps_down = p.length_adjust = 0
-        if p.use_ring and t != 'RING':
+        if p.use_ring and t not in ('RING', 'REFRESH'):
             p.use_ring = False        # 링 상태에서 폭/길이를 만지면 루프로 돌아와서 적용한다
 
         ob = context.edit_object

@@ -50,7 +50,7 @@ from .edge_range import ADJUST_LENGTH_MIN, ADJUST_STEP_MAX, find_between
 from .face_core import order_strip, strip_faces, strip_rails, strip_region
 from .face_shape import (DEFAULT_ANGLE_TOL, DEFAULT_FLAT, DEFAULT_LEN_TOL, flat_island,
                          island_shape, similar_islands)
-from .settings import extension_enabled, use_mirror_extension
+from .settings import extension_enabled, geometry_options, use_mirror_extension
 
 
 def selected_face_indices(bm):
@@ -235,21 +235,10 @@ class MESH_OT_mirror_loop_between(bpy.types.Operator):
     bl_label = "Mirror Loop Between"
     bl_options = {'REGISTER', 'UNDO'}
 
-    max_angle: FloatProperty(
-        name="Max Turn Angle",
-        description="극점/삼각형에서 루프가 꺾여도 계속 진행할 최대 각도 (클수록 더 멀리 감)",
-        default=math.radians(60.0), min=0.0, max=math.radians(120.0),
-        subtype='ANGLE',
-    )
     threshold: FloatProperty(
         name="Mirror Threshold",
         description="버텍스가 미러 평면 위에 있다고 보는 거리 허용 오차",
         default=1e-4, min=0.0, precision=6,
-    )
-    use_dihedral: BoolProperty(
-        name="Use Dihedral",
-        description="면 사이 각도(다이헤드럴)를 보조 기준으로 써서 능선·로우폴리에서 루프가 끊기거나 새는 것을 줄인다",
-        default=True,
     )
     max_steps: IntProperty(
         name="Max Steps",
@@ -298,8 +287,8 @@ class MESH_OT_mirror_loop_between(bpy.types.Operator):
         bm = bmesh.from_edit_mesh(ob.data)
         ensure_tables(bm)
 
-        cos_limit = math.cos(self.max_angle)
-        dih = self.use_dihedral
+        max_angle, dih = geometry_options(context)      # 최대 꺾임 각도/다이헤드럴은 N 패널 설정
+        cos_limit = math.cos(max_angle)
         if dih:
             bm.normal_update()   # 다이헤드럴 계산에 쓰는 면 법선을 최신으로
 
