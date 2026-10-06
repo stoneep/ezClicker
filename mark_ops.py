@@ -3,8 +3,8 @@ mark_ops.py — [엣지] Seam / Sharp 로 마크한 엣지만 골라 선택하�
 
 A 로 전체 선택한 뒤 버튼을 누르면 선택이 '마크한 엣지만' 으로 줄어든다. 같은 버튼을 한 번 더 누르면 누르기 전 선택으로 돌아간다. (토글)
   - Seam 만 / Sharp 만 / 둘 다 (Seam 이거나 Sharp)
-  - 지금 선택한 범위(드래그 / 박스 / 전체 선택) 안에서 먼저 찾는다.
-    그 범위에 마크한 엣지가 없거나 선택이 아예 없으면 보이는 모든 엣지에서 찾고(폴백), 거기에도 없으면 경고만 띄우고 선택은 그대로 둔다.
+  - 지금 선택한 범위(드래그 / 박스 / 전체 선택) 안에서만 찾는다. 범위를 골랐다는 것 자체가 의도이므로, 그 안에 마크가 없으면 전체로 넓히지 않고 경고만 띄우며 선택은 그대로 둔다.
+  - 선택이 아예 없을 때만 보이는 모든 엣지에서 찾는다. 거기에도 없으면 경고.
   - Seam 을 켠 채 Sharp 를 누르면 누르기 전 선택으로 되돌린 뒤 거기서 Sharp 만 고른다. (필터가 겹쳐서 줄어들지 않는다)
   - 엣지 모드에서 쓴다. 버텍스나 면 모드에서는 마크 엣지만 따로 선택해도 이웃 엣지가 따라 선택돼 의미가 없다.
 """
@@ -114,18 +114,14 @@ class MESH_OT_mirror_select_marked(bpy.types.Operator):
                 counts[ob.name] = mesh_counts(bm)
             return pools, total, counts
 
-        whole = not any_selected       # 전체에서 찾았는지 (선택이 없었거나, 선택한 범위에 마크가 없어 폴백한 경우)
+        whole = not any_selected       # 선택이 아예 없을 때만 전체에서 찾는다 (범위를 골랐다면 그 범위만 본다)
         pools, total, counts = collect(any_selected)
-        fallback = False
-        if total == 0 and any_selected:                     # 선택한 범위에 마크가 없다 → 전체에서 찾는다 (폴백)
-            pools, total, counts = collect(False)
-            fallback = whole = total > 0
         found = {}
         if total == 0:
             if active:
                 state.reset_marked()
-            self.report({'WARNING'}, "%s 로 마크한 엣지가 없습니다 (%s 모두 확인했습니다)" % (
-                KIND_TEXT[self.kind], "선택한 범위와 전체를" if any_selected else "전체를"))
+            self.report({'WARNING'}, "%s 마크 엣지가 %s 없습니다" % (
+                KIND_TEXT[self.kind], "선택한 범위에" if any_selected else "전체에"))
             return {'CANCELLED'}
 
         bpy.ops.mesh.select_all(action='DESELECT')
@@ -141,10 +137,10 @@ class MESH_OT_mirror_select_marked(bpy.types.Operator):
             found[ob.name] = idx
 
         state.set_marked({'kind': self.kind, 'snap': snap, 'found': found, 'counts': counts, 'n': total,
-                          'whole': whole, 'fallback': fallback})
+                          'whole': whole})
         self.report({'INFO'}, "%s 마크 엣지 %d개만 선택했습니다 (%s)" % (
             KIND_TEXT[self.kind], total,
-            "선택한 범위에 없어 전체에서 찾았습니다" if fallback else ("전체에서" if whole else "선택한 범위 중")))
+            "전체에서" if whole else "선택한 범위 중"))
         redraw_3d(context)
         return {'FINISHED'}
 
