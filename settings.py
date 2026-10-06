@@ -59,7 +59,8 @@ def _adjust_setter(target, key):
         if adj is None or value == _adjust_getter(key)(self):
             return
         try:
-            bpy.ops.mesh.mirror_loop_adjust('EXEC_DEFAULT', target=target, value=value)
+            op = bpy.ops.mesh.mirror_face_adjust if adj.get('mode') == 'FACE' else bpy.ops.mesh.mirror_loop_adjust
+            op('EXEC_DEFAULT', target=target, value=value)
         except RuntimeError:        # 편집 모드가 아니거나 선택이 바뀌어 조절할 수 없는 상태
             pass
     return set_

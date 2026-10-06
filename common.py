@@ -134,14 +134,35 @@ def restore_selection(objs, snap):
         bmesh.update_edit_mesh(ob.data, loop_triangles=False, destructive=False)
 
 
+def adjust_mode(adj=None):
+    """고정 패널 조절 상태의 종류: 'EDGE'(엣지/버텍스 모드에서 고른 루프) 또는 'FACE'(면 모드 시작 루프 주변 면)."""
+    adj = adj or state.adjust
+    return None if adj is None else adj.get('mode', 'EDGE')
+
+
 def adjust_valid(context):
-    """고정 패널이 조절할 수 있는 상태인지: 마지막 루프 선택의 메시와 선택이 그대로인지 가볍게 확인한다."""
+    """
+    고정 패널이 조절할 수 있는 상태인지: 마지막 루프 선택의 메시와 선택이 그대로인지 가볍게 확인한다.
+
+    EDGE : 엣지/버텍스 모드이고, 기준 루프의 엣지가 아직 선택돼 있다.
+    FACE : 면 전용 모드이고, 시작 루프가 아직 '대기 중'(색 선)이며, 우리가 고른 면이 아직 선택돼 있다.
+    """
     adj = state.adjust
     ob = context.edit_object
     if adj is None or ob is None or context.mode != 'EDIT_MESH' or ob.name != adj['ob']:
         return False
+    face_mode = face_only_mode(context)
     bm = bmesh.from_edit_mesh(ob.data)
     if mesh_counts(bm) != adj['counts']:
+        return False
+    if adjust_mode(adj) == 'FACE':
+        a = state.anchor
+        if not face_mode or a is None or a.get('selected', True) or a['ob'] != ob.name or a['seed'] != adj['seed']:
+            return False
+        bm.faces.ensure_lookup_table()
+        faces = bm.faces
+        return all(faces[i].select for i in adj['added'])
+    if face_mode:
         return False
     bm.edges.ensure_lookup_table()
     edges = bm.edges

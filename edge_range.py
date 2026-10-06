@@ -20,6 +20,50 @@ from .edge_core import find_mirror_edges, trimmed_loop, walk_loop
 from .face_core import opposite_edge
 
 
+ADJUST_STEP_MAX = 50       # 폭(위/아래) 한 쪽의 최대 줄 수. 오퍼레이터 속성의 max 와 같다
+ADJUST_LENGTH_MIN = -200   # 길이 줄이기 한계. 오퍼레이터 속성의 min 과 같다
+
+
+def selected_loop(bm, seed, cos_limit, dih, length_adjust, axes, threshold):
+    """
+    씨앗의 루프를 걸어 '실제로 고를 엣지'를 정한다. (엣지 모드 선택과 면 모드 면 선택이 같이 쓴다)
+
+    length_adjust < 0 이면 클릭한 엣지를 가운데로 엣지를 (전체 + length_adjust)개만 남긴다.
+    줄이는 동안에는 미러 반대편을 쓰지 않는다.
+    반환: dict(loop, mirror, keep, ref_dir, total, full, axes)
+      loop/mirror : 고를 엣지 리스트, keep: 줄였을 때 남긴 수(안 줄였으면 0), total: 루프 전체 길이,
+      full : 줄이기 전 전체 루프의 엣지 인덱스 집합, axes : 실제로 쓴 미러 축
+    """
+    loop = walk_loop(seed, cos_limit, dih)
+    full = {e.index for e in loop}
+    total = len(loop)
+    keep, ref_dir = 0, None
+    if length_adjust < 0:
+        keep = max(1, total + length_adjust)
+        if keep < total:
+            loop, _n, ref_dir = trimmed_loop(seed, cos_limit, dih, keep)
+            axes = []
+        else:
+            keep = 0
+    mirror = find_mirror_edges(bm, loop, axes, threshold, cos_limit, dih) if axes else []
+    return {'loop': loop, 'mirror': mirror, 'keep': keep, 'ref_dir': ref_dir,
+            'total': total, 'full': full, 'axes': axes}
+
+
+def build_sides(bm, st, steps_up, steps_down):
+    """위/아래로 steps 만큼 옆 루프를 계산해 상태에 기록한다. (선택은 바꾸지 않는다) 실제로 만든 (lo, hi)."""
+    lo = hi = 0
+    for k in range(1, steps_up + 1):
+        if not build_offset(bm, st, k):
+            break
+        hi = k
+    for k in range(1, steps_down + 1):
+        if not build_offset(bm, st, -k):
+            break
+        lo = -k
+    return lo, hi
+
+
 def new_wheel_state(ob, bm, seed, loop_idxs, axes, threshold, cos_limit, dih, full_idxs=None):
     """
     Alt+클릭으로 루프를 고른 직후의 휠 확장 상태를 만든다. (state.set_wheel 에 넘긴다)

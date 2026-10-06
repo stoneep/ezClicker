@@ -9,6 +9,10 @@ face_ops.py — [면] 오퍼레이터와 키맵.
   면 모드: 첫 클릭은 아무것도 선택하지 않고 시작 루프만 지정한다. 지정한 루프는 색 선으로 표시되고(overlay.py,
            색/두께는 환경설정), 같은 방향의 다른 루프를 클릭하면 그 사이의 면이 선택된다. Esc 로 지정을 취소한다.
 
+  면 모드 고정 패널: 색 선(시작 루프)이 떠 있는 동안 사이드바(N) 'Mirror Loop' 탭에서 그 선을 가운데로
+           위/아래 면 줄 수와 길이를 숫자칸(드래그)으로 정해 면을 고른다.   -> MESH_OT_mirror_face_adjust
+           (엣지·버텍스 모드의 폭/길이와 같은 규칙, 엣지 대신 면을 고른다. 선택을 풀거나 Esc 로 취소하면 쉰다.)
+
   버텍스 모드에서는 어느 쪽이든 루프의 버텍스를 고르면 Blender 가 그 사이 엣지·면을 자동으로 같이 선택하므로
   결과가 같다. 차이는 엣지 모드에서 가장 분명하다.
 
@@ -29,23 +33,139 @@ Blender 기본의 Ring 선택 키와 같다. 이 키맵이 우선한다.
 """
 
 import math
+from types import SimpleNamespace
 
 import bpy
 import bmesh
-from bpy.props import BoolProperty, FloatProperty, IntProperty, StringProperty
+from bpy.props import BoolProperty, EnumProperty, FloatProperty, IntProperty, StringProperty
 from bpy_extras import view3d_utils
 from mathutils import Vector
 from mathutils.bvhtree import BVHTree
 
 from . import prefs, state
-from .common import (ensure_tables, face_only_mode, get_mirror_axes, mesh_counts, pick_seed,
+from .common import (adjust_valid, ensure_tables, face_only_mode, get_mirror_axes, mesh_counts, pick_seed,
                      redraw_3d, restore_selection, snapshot_selection)
 from .edge_core import find_mirror_edges, walk_loop
-from .edge_range import find_between
-from .face_core import strip_faces
+from .edge_range import (ADJUST_LENGTH_MIN, ADJUST_STEP_MAX, build_sides, find_between, new_wheel_state,
+                         selected_loop)
+from .face_core import init_faces, strip_faces
 from .face_shape import (DEFAULT_ANGLE_TOL, DEFAULT_FLAT, DEFAULT_LEN_TOL, flat_island,
                          island_shape, similar_islands)
 from .settings import extension_enabled, use_mirror_extension
+
+
+def run_face_strip(context, p, prev_added):
+    """
+    면 모드: 대기 중인 시작 루프(색 선)를 가운데로 위/아래 p.steps_up / p.steps_down 줄의 면을 고른다.
+    (엣지 모드의 '폭'과 같은 규칙: 위/아래 방향, 길이 줄이기, 미러 확장을 그대로 쓴다. 다만 엣지 대신 면을 고른다.)
+
+    p          : seed_object, seed_edge, steps_up, steps_down, length_adjust, max_angle, threshold, use_dihedral
+    prev_added : 지난번에 우리가 고른 면 인덱스. 먼저 풀고 다시 고른다. (원래 선택돼 있던 면은 건드리지 않는다.)
+    반환: ('FINISHED' 또는 'CANCELLED', 경고 메시지 또는 None)
+    성공하면 고정 패널용 조절 상태(state.adjust, mode='FACE')를 갱신한다.
+    """
+    state.reset_adjust()
+    ob = next((o for o in context.objects_in_mode_unique_data if o.name == p.seed_object), None)
+    if ob is None or p.seed_edge < 0:
+        return 'CANCELLED', None
+    bm = bmesh.from_edit_mesh(ob.data)
+    ensure_tables(bm)
+    if p.seed_edge >= len(bm.edges):
+        return 'CANCELLED', None
+
+    cos_limit = math.cos(p.max_angle)
+    dih = p.use_dihedral
+    if dih:
+        bm.normal_update()
+    seed = bm.edges[p.seed_edge]
+
+    for i in prev_added:
+        if i < len(bm.faces):
+            bm.faces[i].select_set(False)
+
+    axes = get_mirror_axes(ob) if use_mirror_extension(context) else []
+    sl = selected_loop(bm, seed, cos_limit, dih, p.length_adjust, axes, p.threshold)
+    core = {e.index for e in sl['loop']} | {e.index for e in sl['mirror']}
+    st = new_wheel_state(ob, bm, seed, core, sl['axes'], p.threshold, cos_limit, dih, sl['full'])
+    st['keep'], st['ref_dir'] = sl['keep'], sl['ref_dir']
+    st['faces'][0] = init_faces(context, ob, seed)
+    lo, hi = build_sides(bm, st, p.steps_up, p.steps_down)
+
+    faces = set()
+    if hi > 0:
+        faces |= strip_faces(bm, [st['loops'][k] for k in range(0, hi + 1)])
+    if lo < 0:
+        faces |= strip_faces(bm, [st['loops'][-k] for k in range(0, -lo + 1)])
+    added = set()
+    for f in faces:
+        if not f.select:
+            added.add(f.index)
+            f.select_set(True)
+    bm.select_flush_mode()
+    bmesh.update_edit_mesh(ob.data, loop_triangles=False, destructive=False)
+
+    params = {
+        'seed_object': p.seed_object, 'seed_edge': p.seed_edge, 'do_select': True, 'replace': False,
+        'use_ring': False, 'steps_up': hi, 'steps_down': -lo, 'length_adjust': p.length_adjust,
+        'max_angle': p.max_angle, 'threshold': p.threshold, 'use_dihedral': p.use_dihedral,
+    }
+    state.set_adjust({'mode': 'FACE', 'ob': ob.name, 'seed': seed.index, 'params': params,
+                      'counts': mesh_counts(bm), 'added': added, 'up': hi, 'down': -lo,
+                      'keep': sl['keep'], 'total': sl['total']})
+    return 'FINISHED', None
+
+
+class MESH_OT_mirror_face_adjust(bpy.types.Operator):
+    """면 모드 고정 패널의 숫자칸: 시작 루프(색 선) 위/아래로 면을 몇 줄 고를지, 길이를 바꿔서 다시 선택한다"""
+    bl_idname = "mesh.mirror_face_adjust"
+    bl_label = "Mirror Face Adjust"
+    bl_options = {'UNDO'}
+
+    target: EnumProperty(
+        name="Target",
+        items=(
+            ('UP', "폭: 위쪽", "시작 루프 위쪽으로 면을 몇 줄 고를지"),
+            ('DOWN', "폭: 아래쪽", "시작 루프 아래쪽으로 면을 몇 줄 고를지"),
+            ('LENGTH', "길이", "루프를 따라 몇 칸까지 고를지"),
+            ('RESET', "초기화", "고른 면을 풀고 시작 루프만 남긴다"),
+        ),
+        default='UP',
+    )
+    delta: IntProperty(name="Delta", default=1, min=-ADJUST_STEP_MAX, max=ADJUST_STEP_MAX)
+    value: IntProperty(name="Value", default=-1, min=-1, options={'SKIP_SAVE'})   # 0 이상이면 delta 대신 이 값으로 정한다
+
+    @classmethod
+    def poll(cls, context):
+        return (context.mode == 'EDIT_MESH' and face_only_mode(context)
+                and state.adjust is not None and state.adjust.get('mode') == 'FACE')
+
+    def execute(self, context):
+        adj = state.adjust
+        if not adjust_valid(context):
+            state.reset_adjust()
+            self.report({'WARNING'}, "시작 루프(색 선)가 없거나 선택이 바뀌었습니다. Ctrl+Alt+클릭으로 시작 루프를 다시 지정하세요")
+            redraw_3d(context)
+            return {'CANCELLED'}
+
+        p = SimpleNamespace(**adj['params'])
+        absolute = self.value >= 0
+        t, d = self.target, self.delta
+        if t == 'UP':
+            p.steps_up = min(max(self.value if absolute else p.steps_up + d, 0), ADJUST_STEP_MAX)
+        elif t == 'DOWN':
+            p.steps_down = min(max(self.value if absolute else p.steps_down + d, 0), ADJUST_STEP_MAX)
+        elif t == 'LENGTH':
+            lowest = max(ADJUST_LENGTH_MIN, -(adj['total'] - 1)) if adj['total'] else 0
+            want = (self.value - adj['total']) if absolute else p.length_adjust + d
+            p.length_adjust = min(max(want, lowest), 0)
+        else:
+            p.steps_up = p.steps_down = p.length_adjust = 0
+
+        status, msg = run_face_strip(context, p, adj['added'])
+        if msg:
+            self.report({'WARNING'}, msg)
+        redraw_3d(context)
+        return {status}
 
 
 class MESH_OT_mirror_loop_between(bpy.types.Operator):
@@ -88,6 +208,7 @@ class MESH_OT_mirror_loop_between(bpy.types.Operator):
 
     def invoke(self, context, event):
         state.reset_wheel()  # 휠 확장 상태는 버린다.
+        state.reset_adjust()  # 고정 패널의 조절 상태도 버린다. (대기 중인 시작 루프를 새로 지정하면 아래에서 다시 만든다)
 
         objs = list(context.objects_in_mode_unique_data)
         mouse = Vector((event.mouse_region_x, event.mouse_region_y))
@@ -179,6 +300,17 @@ class MESH_OT_mirror_loop_between(bpy.types.Operator):
         # 끝 루프를 새 앵커로 -> 이어서 Ctrl+Alt+클릭(또는 Shift+Alt+클릭)하면 B~C 구간이 선택된다.
         pending = not (selected or faces)       # 면 모드 첫 클릭처럼 아무것도 선택하지 않고 대기만 하는 경우
         state.set_anchor(ob.name, seed_b.index, counts, selected=not pending, loop=target if pending else None)
+        if pending and face_only:
+            # 고정 패널에서 이 색 선을 가운데로 위/아래 면을 고를 수 있게 한다. (처음엔 고른 면 없음)
+            state.set_adjust({
+                'mode': 'FACE', 'ob': ob.name, 'seed': seed_b.index, 'counts': counts, 'added': set(),
+                'up': 0, 'down': 0, 'keep': 0, 'total': len(loop_b),
+                'params': {
+                    'seed_object': ob.name, 'seed_edge': seed_b.index, 'do_select': True, 'replace': False,
+                    'use_ring': False, 'steps_up': 0, 'steps_down': 0, 'length_adjust': 0,
+                    'max_angle': self.max_angle, 'threshold': self.threshold, 'use_dihedral': self.use_dihedral,
+                },
+            })
         redraw_3d(context)
         return {'FINISHED'}
 
@@ -363,6 +495,7 @@ KEYMAPS = (
 
 classes = (
     MESH_OT_mirror_loop_between,
+    MESH_OT_mirror_face_adjust,
     MESH_OT_mirror_face_similar,
     MESH_OT_mirror_pending_cancel,
 )

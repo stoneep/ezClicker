@@ -32,15 +32,10 @@ from mathutils import Vector
 from . import state
 from .common import (adjust_valid, ensure_tables, face_only_mode, get_mirror_axes, mesh_counts, pick_seed, redraw_3d,
                      restore_selection, snapshot_selection)
-from .edge_core import find_mirror_edges, trimmed_loop, walk_loop
-from .edge_range import (apply_range, build_offset, new_wheel_state, ring_edges, state_valid,
-                         step_both_sides, step_one_side)
+from .edge_range import (ADJUST_LENGTH_MIN, ADJUST_STEP_MAX, apply_range, build_sides, new_wheel_state,
+                         ring_edges, selected_loop, state_valid, step_both_sides, step_one_side)
 from .face_core import init_faces
 from .settings import extension_enabled, get_settings, use_mirror_extension
-
-
-ADJUST_STEP_MAX = 50       # 폭(위/아래) 한 쪽의 최대 줄 수. 오퍼레이터 속성의 max 와 같다
-ADJUST_LENGTH_MIN = -200   # 길이 줄이기 한계. 오퍼레이터 속성의 min 과 같다
 
 
 def expand_sides(context, ob, bm, seed, st, steps_up, steps_down):
@@ -48,15 +43,7 @@ def expand_sides(context, ob, bm, seed, st, steps_up, steps_down):
     if not (steps_up or steps_down):
         return
     st['faces'][0] = init_faces(context, ob, seed)
-    lo = hi = 0
-    for k in range(1, steps_up + 1):
-        if not build_offset(bm, st, k):
-            break
-        hi = k
-    for k in range(1, steps_down + 1):
-        if not build_offset(bm, st, -k):
-            break
-        lo = -k
+    lo, hi = build_sides(bm, st, steps_up, steps_down)
     if (lo, hi) != (0, 0):
         apply_range(bm, st, lo, hi)
         st['lo'], st['hi'] = lo, hi
@@ -112,25 +99,13 @@ def run_selection(context, p):
         bmesh.update_edit_mesh(ob.data, loop_triangles=False, destructive=False)
         return 'FINISHED', None
 
-    # 씨앗에서 직접 끝까지 걸어 루프를 완성하고 미러 반대편까지 확장
-    loop = walk_loop(seed, cos_limit, dih)
-    full_idxs = {e.index for e in loop}
-    total = len(loop)
-    # 1단계에서는 미러 반대편을 확장하지 않는다.
-    axes = get_mirror_axes(ob) if use_mirror_extension(context) else []
-
+    # 씨앗에서 직접 끝까지 걸어 루프를 완성하고 미러 반대편까지 확장 (1단계에서는 미러 반대편을 확장하지 않는다)
     # 길이 줄이기: 클릭한 엣지를 가운데로 엣지를 keep 개만 남긴다.
     # 줄이는 동안에는 미러 반대편과 '기본 루프가 고른 엣지'(루프 전체)를 쓰지 않는다.
-    keep, ref_dir = 0, None
-    if p.do_select and p.length_adjust < 0:
-        keep = max(1, len(loop) + p.length_adjust)
-        if keep < len(loop):
-            window, _n, ref_dir = trimmed_loop(seed, cos_limit, dih, keep)
-            loop = window
-            axes = []
-        else:
-            keep = 0
-    mirror = find_mirror_edges(bm, loop, axes, p.threshold, cos_limit, dih) if axes else []
+    axes = get_mirror_axes(ob) if use_mirror_extension(context) else []
+    sl = selected_loop(bm, seed, cos_limit, dih, p.length_adjust if p.do_select else 0, axes, p.threshold)
+    loop, mirror, keep, ref_dir, total, full_idxs, axes = (
+        sl['loop'], sl['mirror'], sl['keep'], sl['ref_dir'], sl['total'], sl['full'], sl['axes'])
     for e in loop:
         e.select_set(p.do_select)
     for e in mirror:
