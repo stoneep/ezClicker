@@ -21,6 +21,7 @@ import bpy
 from bpy.props import EnumProperty
 
 from . import prefs, state
+from .mark_ops import KINDS as MARK_KINDS, edge_mode, marked_valid
 from .common import adjust_mode, adjust_valid, face_only_mode, similar_edge_valid, similar_valid, spread_valid
 from .settings import LEVEL_ICON, LEVEL_ITEMS, LEVEL_SHORT, get_settings
 
@@ -378,6 +379,37 @@ class VIEW3D_PT_mirror_loop_spread(bpy.types.Panel):
         layout.label(text="퍼뜨린 직후 Alt+휠로도 단계를 바꿉니다")
 
 
+class VIEW3D_PT_mirror_loop_marked(bpy.types.Panel):
+    """마크 엣지만 선택: A 로 전체 선택한 뒤 Seam / Sharp 로 마크한 엣지만 남기는 토글 버튼."""
+    bl_label = "마크 엣지만 선택"
+    bl_idname = "VIEW3D_PT_mirror_loop_marked"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = "Mirror Loop"
+
+    @classmethod
+    def poll(cls, context):
+        return context.mode == 'EDIT_MESH'
+
+    def draw(self, context):
+        layout = self.layout
+        if not edge_mode(context):
+            layout.label(text="엣지 모드에서 쓸 수 있습니다", icon='INFO')
+            return
+        info = state.marked
+        active = info['kind'] if info is not None and marked_valid(context) else None   # 큰 메시는 가볍게만 확인한다
+        col = layout.column(align=True)
+        icons = {'SEAM': 'MOD_EDGESPLIT', 'SHARP': 'SHARPCURVE', 'BOTH': 'EDGESEL'}
+        for ident, name, _desc in MARK_KINDS:
+            op = col.operator("mesh.mirror_select_marked", text=name, icon=icons[ident], depress=(active == ident))
+            op.kind = ident
+        if active is not None:
+            layout.label(text="%d개 선택 · 한 번 더 누르면 원래 선택" % info['n'], icon='CHECKMARK')
+        else:
+            layout.label(text="A 로 전체 선택한 뒤 누르세요")
+            layout.label(text="(선택이 없으면 전체에서 찾습니다)")
+
+
 def draw_header_button(self, context):
     """3D 뷰포트 헤더(편집 모드)에 현재 단계를 보여주는 버튼."""
     if context.mode != 'EDIT_MESH':
@@ -443,4 +475,5 @@ classes = (
     VIEW3D_PT_mirror_loop_similar,
     VIEW3D_PT_mirror_loop_similar_edge,
     VIEW3D_PT_mirror_loop_spread,
+    VIEW3D_PT_mirror_loop_marked,
 )

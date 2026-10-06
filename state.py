@@ -19,6 +19,8 @@ state.py — 모듈 사이에서 공유하는 런타임 상태.
            {'seeds'(오브젝트별 씨앗 엣지), 'snap', 'found'(오브젝트별 찾은 엣지), 'counts', 'loops'}
   spread : 마지막 '버텍스에서 퍼뜨리기' 결과. 옵션이 바뀌면 같은 시작 버텍스로 다시 퍼뜨리는 데 쓴다.
            {'seeds'(오브젝트별 시작 버텍스), 'snap', 'found'(오브젝트별 선택한 버텍스), 'counts', 'faces', 'edges', 'verts', 'blocked'}
+  marked : 'Seam/Sharp 마크 엣지만 선택' 토글의 현재 상태. 같은 버튼을 다시 누르면 snap(누르기 전 선택)으로 돌아간다.
+           {'kind', 'snap', 'found'(오브젝트별 고른 엣지), 'counts', 'n', 'whole'(선택이 없어 전체에서 골랐는지)}
   keymap_items : __init__.register() 가 등록한 단축키 목록. 환경설정(prefs)이 이걸 보고 그린다.
            각 항목은 {'idname', 'kmi', 'km_name', 'title', 'desc'} 딕셔너리.
 """
@@ -29,6 +31,7 @@ adjust = None
 similar = None
 similar_edge = None
 spread = None
+marked = None
 keymap_items = []
 last_info = None      # 마지막 루프 선택이 어떤 규칙으로 몇 개를 골랐는지(상태 표시줄 안내용)
 
@@ -92,11 +95,22 @@ def reset_spread():
     spread = None
 
 
+def set_marked(info):
+    global marked
+    marked = info
+
+
+def reset_marked():
+    global marked
+    marked = None
+
+
 def reset_all():
-    global wheel, anchor, adjust, similar, similar_edge, spread
+    global wheel, anchor, adjust, similar, similar_edge, spread, marked
     wheel = None
     anchor = None
     adjust = None
     similar = None
     similar_edge = None
     spread = None
+    marked = None
