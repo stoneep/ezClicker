@@ -16,7 +16,8 @@ edge_range.py — [엣지] 옆 루프로 선택 범위를 넓히고 줄이는 �
 """
 
 from .common import mesh_counts
-from .edge_core import find_mirror_edges, trimmed_loop, walk_loop
+from .edge_core import find_mirror_edges, trim_window, trimmed_loop, walk_loop
+from .edge_outline import region_outline
 from .face_core import opposite_edge
 
 
@@ -35,6 +36,24 @@ def selected_loop(bm, seed, cos_limit, dih, length_adjust, axes, threshold):
       full : 줄이기 전 전체 루프의 엣지 인덱스 집합, axes : 실제로 쓴 미러 축
     """
     loop = walk_loop(seed, cos_limit, dih)
+    # 큰 평평한 영역의 날카로운 테두리인데 워커 결과가 틀렸다면(안쪽 쪼갠 선으로 새거나 모서리에서 멈춤)
+    # 그 영역의 경계를 루프로 확정한다. (edge_outline.py)
+    outline = region_outline(bm, seed, loop)
+    if outline is not None:
+        chain, pos, _closed = outline
+        total = len(chain)
+        keep, ref_dir, loop = 0, None, chain
+        if length_adjust < 0:
+            keep = max(1, total + length_adjust)
+            if keep < total:
+                loop = trim_window(chain, pos, True, keep)
+                v0 = (set(chain[0].verts) - set(chain[1].verts)).pop() if total > 1 else chain[0].verts[0]
+                ref_dir = chain[0].other_vert(v0).co - v0.co
+            else:
+                keep = 0
+        return {'loop': loop, 'mirror': [], 'keep': keep, 'ref_dir': ref_dir,
+                'total': total, 'full': {e.index for e in chain}, 'axes': [], 'outline': True}
+
     full = {e.index for e in loop}
     total = len(loop)
     keep, ref_dir = 0, None
@@ -47,7 +66,7 @@ def selected_loop(bm, seed, cos_limit, dih, length_adjust, axes, threshold):
             keep = 0
     mirror = find_mirror_edges(bm, loop, axes, threshold, cos_limit, dih) if axes else []
     return {'loop': loop, 'mirror': mirror, 'keep': keep, 'ref_dir': ref_dir,
-            'total': total, 'full': full, 'axes': axes}
+            'total': total, 'full': full, 'axes': axes, 'outline': False}
 
 
 def build_sides(bm, st, steps_up, steps_down):

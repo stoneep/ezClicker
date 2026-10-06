@@ -33,6 +33,7 @@ from mathutils import Vector
 from . import state
 from .common import (adjust_valid, similar_edge_valid, ensure_tables, face_only_mode, get_mirror_axes, mesh_counts, pick_seed, redraw_3d,
                      restore_selection, snapshot_selection)
+from .edge_core import CREASE_SIMILAR, crease_angle
 from .edge_range import (ADJUST_LENGTH_MIN, ADJUST_STEP_MAX, apply_range, build_sides, new_wheel_state,
                          ring_edges, selected_loop, state_valid, step_both_sides, step_one_side)
 from .face_core import init_faces
@@ -114,9 +115,13 @@ def run_selection(context, p):
         e.select_set(p.do_select)
     for e in mirror:
         e.select_set(p.do_select)
-    if not keep:
+    if not keep and not sl['outline']:
+        # Blender 기본 루프가 더 간 엣지도 함께 고른다(불리언 교차선 등). 단, 쪼개진 면에서 기본 루프가 안쪽 쪼갠 선으로 샌 것까지
+        # 섞이지 않도록, 우리 루프와 꺾임이 비슷한 엣지만 받는다. (교차선·테두리는 날카롭고 안쪽 쪼갠 선은 평평하다)
+        angles = sorted(crease_angle(e) for e in loop)
+        ref = angles[len(angles) // 2] if angles else 0.0
         for i in (int(s) for s in p.default_edges.split(",") if s):
-            if i < len(bm.edges):
+            if i < len(bm.edges) and abs(crease_angle(bm.edges[i]) - ref) <= CREASE_SIMILAR:
                 bm.edges[i].select_set(p.do_select)
     bm.select_flush_mode()
 

@@ -13,6 +13,7 @@ Mirror Loop Select
 
   edge_core.py   [엣지] 루프 걷기, 다이헤드럴 보조 점수, 미러 반대편 루프 찾기
   edge_range.py  [엣지] 휠 확장/축소(오프셋 루프), 시작~끝 루프 사이 탐색
+  edge_outline.py [엣지] 큰 평평한 면의 날카로운 테두리 확정 (면이 이상하게 쪼개져도 테두리를 끝까지 선택)
   edge_shape.py  [엣지] 같은 모양의 엣지 루프 찾기 (톱니바퀴 림 윤곽, 푸리에 진폭 비교)
   edge_ops.py    [엣지] Alt+클릭 루프 선택, Alt/Ctrl+휠 확장, 같은 모양 엣지 루프 오퍼레이터
 
@@ -46,13 +47,13 @@ bl_info = {
 # (순서는 의존 방향을 따른다: 아래쪽 모듈이 먼저)
 if "bpy" in locals():
     import importlib
-    from . import (state, common, face_shape, face_patch, settings, face_core, edge_core, edge_shape, edge_range,
+    from . import (state, common, face_shape, face_patch, settings, face_core, edge_core, edge_outline, edge_shape, edge_range,
                    edge_ops, face_ops, prefs, ui, overlay)
-    for _m in (state, common, face_shape, face_patch, settings, face_core, edge_core, edge_shape, edge_range,
+    for _m in (state, common, face_shape, face_patch, settings, face_core, edge_core, edge_outline, edge_shape, edge_range,
                edge_ops, face_ops, prefs, ui, overlay):
         importlib.reload(_m)
 else:
-    from . import (state, common, face_shape, face_patch, settings, face_core, edge_core, edge_shape, edge_range,  # noqa: F401
+    from . import (state, common, face_shape, face_patch, settings, face_core, edge_core, edge_outline, edge_shape, edge_range,  # noqa: F401
                    edge_ops, face_ops, prefs, ui, overlay)
 
 import bpy
