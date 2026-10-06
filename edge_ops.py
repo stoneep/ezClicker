@@ -24,18 +24,21 @@ edge_ops.py — [엣지] 오퍼레이터와 키맵.
 import math
 from types import SimpleNamespace
 
+import numpy as np
 import bpy
 import bmesh
 from bpy.props import BoolProperty, EnumProperty, FloatProperty, IntProperty, StringProperty
 from mathutils import Vector
 
 from . import state
-from .common import (adjust_valid, ensure_tables, face_only_mode, get_mirror_axes, mesh_counts, pick_seed, redraw_3d,
+from .common import (adjust_valid, similar_edge_valid, ensure_tables, face_only_mode, get_mirror_axes, mesh_counts, pick_seed, redraw_3d,
                      restore_selection, snapshot_selection)
 from .edge_range import (ADJUST_LENGTH_MIN, ADJUST_STEP_MAX, apply_range, build_sides, new_wheel_state,
                          ring_edges, selected_loop, state_valid, step_both_sides, step_one_side)
 from .face_core import init_faces
-from .settings import extension_enabled, geometry_options, get_settings, use_mirror_extension
+from .edge_shape import selected_chains, seed_shapes, similar_loops
+from .settings import (edge_similar_options, extension_enabled, geometry_options, get_settings,
+                       use_mirror_extension)
 
 
 def expand_sides(context, ob, bm, seed, st, steps_up, steps_down):
@@ -254,6 +257,80 @@ class MESH_OT_mirror_loop_select(bpy.types.Operator):
         return {status}
 
 
+class MESH_OT_mirror_edge_similar(bpy.types.Operator):
+    """선택한 엣지 루프와 같은 모양의 엣지 루프를 전부 선택 (톱니바퀴 림처럼 뾰족한 윤곽, 베벨·버텍스 수·회전·크기 달라도)"""
+    bl_idname = "mesh.mirror_edge_similar"
+    bl_label = "Select Similar Edge Loops"
+    bl_options = {'UNDO'}      # 옵션은 사이드바(N) 'Mirror Loop' 탭의 '같은 모양 엣지 루프' 섹션에 있다.
+
+    refresh: BoolProperty(options={'HIDDEN', 'SKIP_SAVE'}, default=False)    # 옵션이 바뀌어 같은 씨앗으로 다시 찾기
+
+    @classmethod
+    def poll(cls, context):
+        return context.mode == 'EDIT_MESH' and extension_enabled(context) and not face_only_mode(context)
+
+    def execute(self, context):
+        opt = edge_similar_options(context)
+        objs = list(context.objects_in_mode_unique_data)
+        prev = state.similar_edge if self.refresh else None
+        if self.refresh:
+            if prev is None or not similar_edge_valid(context):
+                state.reset_similar_edge()
+                return {'CANCELLED'}
+            restore_selection(objs, prev['snap'])
+            snap = prev['snap']
+        else:
+            snap = snapshot_selection(objs)
+
+        # 1) 씨앗: 다시 찾기면 처음 씨앗 엣지, 아니면 지금 선택한 엣지. 월드 좌표로 읽어 오브젝트 크기 차이를 맞춘다.
+        bms = [bmesh.from_edit_mesh(ob.data) for ob in objs]
+        seed_idx, chains = {}, []
+        for ob, bm in zip(objs, bms):
+            ensure_tables(bm)
+            if prev is not None:
+                edges = [bm.edges[i] for i in prev['seeds'].get(ob.name, ()) if i < len(bm.edges)]
+            else:
+                edges = [e for e in bm.edges if e.select and not e.hide]
+            seed_idx[ob.name] = {e.index for e in edges}
+            chains.extend(selected_chains(edges, np.array(ob.matrix_world)))
+        if not any(seed_idx.values()):
+            self.report({'WARNING'}, "기준이 될 엣지 루프를 선택하세요 (Alt+클릭으로 루프를 고른 뒤 실행)")
+            return {'CANCELLED'}
+        shapes = seed_shapes(chains)
+        if not shapes:
+            self.report({'WARNING'}, "선택한 엣지가 한 줄로 이어진 루프가 아닙니다 (갈라지거나 길이가 0). 루프 하나를 골라 주세요")
+            return {'CANCELLED'}
+
+        # 2) 모든 편집 중인 오브젝트에서 같은 모양 루프 찾기
+        max_angle, dih = geometry_options(context)
+        cos_limit = math.cos(max_angle)
+        if not opt.extend:
+            bpy.ops.mesh.select_all(action='DESELECT')
+        found_idx, counts, total = {}, {}, 0
+        for ob in objs:
+            bm = bmesh.from_edit_mesh(ob.data)
+            ensure_tables(bm)
+            if dih:
+                bm.normal_update()
+            loops = similar_loops(bm, shapes, cos_limit, dih, opt.shape_tol, opt.size_tol, opt.scale_invariant,
+                                  np.array(ob.matrix_world))
+            idx = set()
+            for chain in loops:
+                for e in chain:
+                    e.select_set(True)
+                    idx.add(e.index)
+            total += len(loops)
+            found_idx[ob.name] = idx
+            counts[ob.name] = mesh_counts(bm)
+            bm.select_flush_mode()
+            bmesh.update_edit_mesh(ob.data, loop_triangles=False, destructive=False)
+
+        state.set_similar_edge({'seeds': seed_idx, 'snap': snap, 'found': found_idx, 'counts': counts, 'loops': total})
+        self.report({'INFO'}, "같은 모양 엣지 루프 %d개 선택" % total)
+        redraw_3d(context)
+        return {'FINISHED'}
+
+
 class MESH_OT_mirror_loop_step(bpy.types.Operator):
     """루프 선택 후 휠: 옆 루프까지 선택 범위를 늘리거나 줄인다 (Alt = 위·아래 동시, Ctrl = 한 방향)"""
     bl_idname = "mesh.mirror_loop_step"
@@ -455,4 +532,5 @@ classes = (
     MESH_OT_mirror_loop_step,
     MESH_OT_mirror_loop_adjust,
     MESH_OT_mirror_loop_panel,
+    MESH_OT_mirror_edge_similar,
 )

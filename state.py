@@ -15,6 +15,8 @@ state.py — 모듈 사이에서 공유하는 런타임 상태.
            {'chain'(줄의 면 인덱스 순서), 'closed', 'seed', 'seed_pos', 'up_is_left', 'pre'(원래 선택), 'added'(우리가 고른 면), ...}
   similar : 마지막 '같은 모양 면 선택' 결과. 패널 옵션이 바뀌면 같은 기준 면으로 다시 찾는 데 쓴다.
            {'seeds'(오브젝트별 기준 면), 'snap'(찾기 전 선택), 'found'(오브젝트별 찾은 면), 'counts', 'regions', 'faces'}
+  similar_edge : 마지막 '같은 모양 엣지 루프' 결과. 옵션이 바뀌면 같은 씨앗 루프로 다시 찾는 데 쓴다.
+           {'seeds'(오브젝트별 씨앗 엣지), 'snap', 'found'(오브젝트별 찾은 엣지), 'counts', 'loops'}
   keymap_items : __init__.register() 가 등록한 단축키 목록. 환경설정(prefs)이 이걸 보고 그린다.
            각 항목은 {'idname', 'kmi', 'km_name', 'title', 'desc'} 딕셔너리.
 """
@@ -23,6 +25,7 @@ wheel = None
 anchor = None
 adjust = None
 similar = None
+similar_edge = None
 keymap_items = []
 
 
@@ -65,9 +68,20 @@ def reset_similar():
     similar = None
 
 
+def set_similar_edge(info):
+    global similar_edge
+    similar_edge = info
+
+
+def reset_similar_edge():
+    global similar_edge
+    similar_edge = None
+
+
 def reset_all():
-    global wheel, anchor, adjust, similar
+    global wheel, anchor, adjust, similar, similar_edge
     wheel = None
     anchor = None
     adjust = None
     similar = None
+    similar_edge = None

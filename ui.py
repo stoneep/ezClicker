@@ -21,7 +21,7 @@ import bpy
 from bpy.props import EnumProperty
 
 from . import prefs, state
-from .common import adjust_mode, adjust_valid, face_only_mode, similar_valid
+from .common import adjust_mode, adjust_valid, face_only_mode, similar_edge_valid, similar_valid
 from .settings import LEVEL_ICON, LEVEL_ITEMS, LEVEL_SHORT, get_settings
 
 
@@ -303,6 +303,41 @@ class VIEW3D_PT_mirror_loop_similar(bpy.types.Panel):
         layout.label(text="옵션을 바꾸면 같은 기준 면으로 다시 찾습니다")
 
 
+class VIEW3D_PT_mirror_loop_similar_edge(bpy.types.Panel):
+    """같은 모양 엣지 루프: 톱니바퀴 림처럼 뾰족한 윤곽의 엣지 루프를 다른 곳에서 찾는다. (베벨, 버텍스 수, 회전, 크기가 달라도)"""
+    bl_label = "같은 모양 엣지 루프"
+    bl_idname = "VIEW3D_PT_mirror_loop_similar_edge"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = "Mirror Loop"
+
+    @classmethod
+    def poll(cls, context):
+        return context.mode == 'EDIT_MESH'
+
+    def draw(self, context):
+        s = get_settings(context)
+        if s is None:
+            return
+        layout = self.layout
+        if face_only_mode(context):
+            layout.label(text="엣지(또는 버텍스) 모드에서 쓸 수 있습니다", icon='INFO')
+            return
+        layout.operator("mesh.mirror_edge_similar", text="선택한 루프와 같은 모양 찾기", icon='EDGESEL')
+        info = state.similar_edge
+        if info is not None and similar_edge_valid(context):
+            layout.label(text="같은 모양 루프 %d개" % info['loops'], icon='CHECKMARK')
+        else:
+            layout.label(text="Alt+클릭으로 루프를 고른 뒤 누르세요")
+        col = layout.column(align=True)
+        col.prop(s, "edge_similar_extend")
+        col.prop(s, "edge_similar_scale_invariant")
+        col = layout.column(align=True)
+        col.prop(s, "edge_similar_shape_tol")
+        col.prop(s, "edge_similar_size_tol")
+        layout.label(text="옵션을 바꾸면 같은 루프로 다시 찾습니다")
+
+
 def draw_header_button(self, context):
     """3D 뷰포트 헤더(편집 모드)에 현재 단계를 보여주는 버튼."""
     if context.mode != 'EDIT_MESH':
@@ -327,8 +362,11 @@ def draw_context_menu(self, context):
 
 
 def draw_select_similar(self, context):
-    """Shift+G (Select Similar) 메뉴에 '모양' 항목을 붙인다. 선택한 면과 같은 모양의 면을 찾는다."""
-    self.layout.operator("mesh.mirror_face_similar", text="모양 (Shape)")
+    """Shift+G (Select Similar) 메뉴에 '모양' 항목을 붙인다. 면 모드면 같은 모양의 면, 엣지/버텍스 모드면 같은 모양의 엣지 루프."""
+    if face_only_mode(context):
+        self.layout.operator("mesh.mirror_face_similar", text="모양 (Shape)")
+    else:
+        self.layout.operator("mesh.mirror_edge_similar", text="모양 (Shape)")
 
 
 def register_hooks():
@@ -363,4 +401,5 @@ classes = (
     VIEW3D_PT_mirror_loop_adjust,
     VIEW3D_PT_mirror_loop_adjust_options,
     VIEW3D_PT_mirror_loop_similar,
+    VIEW3D_PT_mirror_loop_similar_edge,
 )

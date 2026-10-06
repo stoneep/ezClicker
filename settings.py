@@ -97,6 +97,17 @@ def _on_similar_update(self, context):
         pass
 
 
+def _on_edge_similar_update(self, context):
+    """같은 모양 엣지 루프의 옵션이 바뀌면, 방금 찾은 결과를 같은 씨앗 루프로 새 옵션에 맞춰 다시 찾는다."""
+    from .common import similar_edge_valid
+    if state.similar_edge is None or not similar_edge_valid(context):
+        return
+    try:
+        bpy.ops.mesh.mirror_edge_similar('EXEC_DEFAULT', refresh=True)
+    except RuntimeError:
+        pass
+
+
 SIMILAR_MODES = (
     ('FLAT', "평평한 영역 외곽선",
      "이웃한 평평한 면들을 한 덩어리로 보고 외곽선 모양(변 길이, 꺾임 각)을 비교한다. 기어처럼 뾰족한 평면 모양에 정확하다", 'MESH_PLANE', 0),
@@ -107,6 +118,30 @@ SIMILAR_MODES = (
 
 
 class MLS_Settings(bpy.types.PropertyGroup):
+    edge_similar_extend: BoolProperty(
+        name="기존 선택에 추가",
+        description="기존 선택을 지우지 않고 찾은 루프를 더한다",
+        default=False, update=_on_edge_similar_update,
+    )
+    edge_similar_scale_invariant: BoolProperty(
+        name="크기 무시",
+        description="크기가 달라도 모양이 같으면(닮음) 찾는다",
+        default=False, update=_on_edge_similar_update,
+    )
+    edge_similar_shape_tol: FloatProperty(
+        name="모양 허용 오차",
+        description="윤곽 곡선의 진폭이 기준과 이 비율(%) 이내로 다르면 같은 모양으로 본다. "
+                    "베벨이 많이 들어가 모서리가 둥근 쪽을 찾으려면 키운다. 화살표/Ctrl+휠은 1% 씩",
+        default=15.0, min=2.0, max=60.0, soft_max=40.0, subtype='PERCENTAGE', step=100, precision=0,
+        update=_on_edge_similar_update,
+    )
+    edge_similar_size_tol: FloatProperty(
+        name="크기 허용 오차",
+        description="크기를 무시하지 않을 때 평균 반지름이 이 비율(%) 이내로 같으면 같은 크기로 본다. "
+                    "너무 크면 베벨로 생긴 바로 옆 평행 루프까지 같이 잡힌다. 화살표/Ctrl+휠은 0.1% 씩",
+        default=2.0, min=0.1, max=30.0, soft_max=10.0, subtype='PERCENTAGE', step=10, precision=1,
+        update=_on_edge_similar_update,
+    )
     similar_mode: EnumProperty(
         name="비교 기준",
         description="무엇을 보고 같은 모양인지 판단할지",
@@ -232,6 +267,16 @@ def similar_options(context):
         length_tolerance=s.similar_length_tolerance / 100.0, angle_tolerance=s.similar_angle_tolerance,
         flat_angle=s.similar_flat_angle, mode=s.similar_mode, patch_angle=s.similar_patch_angle,
         curve_tolerance=s.similar_curve_tolerance / 100.0)
+
+
+def edge_similar_options(context):
+    """같은 모양 엣지 루프 옵션 (설정이 아직 없으면 기본값). 허용 오차는 비율(0~1)로 돌려준다."""
+    from types import SimpleNamespace
+    s = get_settings(context)
+    if s is None:
+        return SimpleNamespace(extend=False, scale_invariant=False, shape_tol=0.15, size_tol=0.02)
+    return SimpleNamespace(extend=s.edge_similar_extend, scale_invariant=s.edge_similar_scale_invariant,
+                           shape_tol=s.edge_similar_shape_tol / 100.0, size_tol=s.edge_similar_size_tol / 100.0)
 
 
 def extension_enabled(context):
