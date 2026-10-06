@@ -233,7 +233,7 @@ class MESH_OT_mirror_loop_between(bpy.types.Operator):
     """Alt+클릭으로 고른 시작 루프와 이 키로 클릭한 끝 루프 사이를 전부(또는 루프만) 선택"""
     bl_idname = "mesh.mirror_loop_between"
     bl_label = "Mirror Loop Between"
-    bl_options = {'REGISTER', 'UNDO'}
+    bl_options = {'UNDO'}      # execute 가 없어 '마지막 작업' 패널은 어차피 뜨지 않는다. 옵션은 키맵(select_faces)과 설정(N 패널)으로 준다.
 
     threshold: FloatProperty(
         name="Mirror Threshold",
