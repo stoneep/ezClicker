@@ -166,3 +166,21 @@ def adjust_valid(context):
     bm.edges.ensure_lookup_table()
     edges = bm.edges
     return all(edges[i].select for i in adj['core'])
+
+
+def similar_valid(context):
+    """마지막 '같은 모양 면 선택' 결과가 그대로인지: 편집 중이고, 메시가 같고, 찾은 면이 아직 선택돼 있다."""
+    info = state.similar
+    if info is None or context.mode != 'EDIT_MESH':
+        return False
+    for ob in context.objects_in_mode_unique_data:
+        if ob.name not in info['counts']:
+            return False
+        bm = bmesh.from_edit_mesh(ob.data)
+        if mesh_counts(bm) != info['counts'][ob.name]:
+            return False
+        bm.faces.ensure_lookup_table()
+        faces = bm.faces
+        if not all(faces[i].select for i in info['found'].get(ob.name, ())):
+            return False
+    return True

@@ -21,7 +21,7 @@ import bpy
 from bpy.props import EnumProperty
 
 from . import prefs, state
-from .common import adjust_mode, adjust_valid, face_only_mode
+from .common import adjust_mode, adjust_valid, face_only_mode, similar_valid
 from .settings import LEVEL_ICON, LEVEL_ITEMS, LEVEL_SHORT, get_settings
 
 
@@ -261,6 +261,41 @@ class VIEW3D_PT_mirror_loop_select(bpy.types.Panel):
             draw_panel_body(self.layout.column(align=True), s)
 
 
+class VIEW3D_PT_mirror_loop_similar(bpy.types.Panel):
+    """같은 모양 면 선택: 기어, 나사 머리처럼 평평한 같은 모양의 면을 한 번에 고른다.
+    (예전에는 실행 직후 왼쪽 아래 '마지막 작업' 패널에 있던 옵션. 이제 여기서 바꾸면 바로 다시 찾는다.)"""
+    bl_label = "같은 모양 면 선택"
+    bl_idname = "VIEW3D_PT_mirror_loop_similar"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = "Mirror Loop"
+
+    @classmethod
+    def poll(cls, context):
+        return context.mode == 'EDIT_MESH'
+
+    def draw(self, context):
+        s = get_settings(context)
+        if s is None:
+            return
+        layout = self.layout
+        layout.operator("mesh.mirror_face_similar", text="선택한 면과 같은 모양 찾기", icon='FACESEL')
+        info = state.similar
+        if info is not None and similar_valid(context):
+            layout.label(text="같은 모양 %d곳 (면 %d개)" % (info['regions'], info['faces']), icon='CHECKMARK')
+        else:
+            layout.label(text="면을 선택하거나 Alt+더블클릭하세요")
+        col = layout.column(align=True)
+        col.prop(s, "similar_extend")
+        col.prop(s, "similar_scale_invariant")
+        col.prop(s, "similar_use_island")
+        col = layout.column(align=True)
+        col.prop(s, "similar_length_tolerance")
+        col.prop(s, "similar_angle_tolerance")
+        col.prop(s, "similar_flat_angle")
+        layout.label(text="옵션을 바꾸면 같은 기준 면으로 다시 찾습니다")
+
+
 def draw_header_button(self, context):
     """3D 뷰포트 헤더(편집 모드)에 현재 단계를 보여주는 버튼."""
     if context.mode != 'EDIT_MESH':
@@ -320,4 +355,5 @@ classes = (
     VIEW3D_PT_mirror_loop_select,
     VIEW3D_PT_mirror_loop_adjust,
     VIEW3D_PT_mirror_loop_adjust_options,
+    VIEW3D_PT_mirror_loop_similar,
 )

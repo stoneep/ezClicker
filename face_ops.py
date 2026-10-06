@@ -44,13 +44,12 @@ from mathutils.bvhtree import BVHTree
 
 from . import prefs, state
 from .common import (adjust_valid, ensure_tables, face_only_mode, get_mirror_axes, mesh_counts, pick_seed,
-                     redraw_3d, restore_selection, screen_mid, screen_score, snapshot_selection)
+                     redraw_3d, restore_selection, screen_mid, screen_score, similar_valid, snapshot_selection)
 from .edge_core import find_mirror_edges, walk_loop
 from .edge_range import ADJUST_LENGTH_MIN, ADJUST_STEP_MAX, find_between
 from .face_core import order_strip, strip_faces, strip_rails, strip_region
-from .face_shape import (DEFAULT_ANGLE_TOL, DEFAULT_FLAT, DEFAULT_LEN_TOL, flat_island,
-                         island_shape, similar_islands)
-from .settings import extension_enabled, geometry_options, use_mirror_extension
+from .face_shape import flat_island, island_shape, similar_islands
+from .settings import extension_enabled, geometry_options, similar_options, use_mirror_extension
 
 
 def selected_face_indices(bm):
@@ -358,41 +357,12 @@ class MESH_OT_mirror_face_similar(bpy.types.Operator):
     """클릭한(또는 선택한) 면과 같은 모양의 평평한 면 영역을 전부 선택 (회전·거울·이동 무관)"""
     bl_idname = "mesh.mirror_face_similar"
     bl_label = "Select Similar Shape"
-    bl_options = {'REGISTER', 'UNDO'}
+    bl_options = {'UNDO'}      # 옵션(크기 무시, 허용 오차 등)은 사이드바(N) 'Mirror Loop' 탭의 '같은 모양 면 선택' 섹션에 있다.
 
-    extend: BoolProperty(
-        name="Extend",
-        description="기존 선택을 지우지 않고 찾은 면을 추가한다",
-        default=False,
-    )
-    scale_invariant: BoolProperty(
-        name="Ignore Size",
-        description="크기가 달라도 모양이 같으면(닮음) 찾는다",
-        default=False,
-    )
-    use_island: BoolProperty(
-        name="Flat Regions",
-        description="이웃한 평평한 면들을 한 덩어리의 모양으로 비교한다. 끄면 면 하나씩 비교한다",
-        default=True,
-    )
-    length_tolerance: FloatProperty(
-        name="Length Tolerance",
-        description="변 길이가 이 비율 이내로 다르면 같다고 본다 (0.01 = 1%)",
-        default=DEFAULT_LEN_TOL, min=0.0, max=0.5, precision=3,
-    )
-    angle_tolerance: FloatProperty(
-        name="Angle Tolerance",
-        description="꺾임 각이 이 이내로 다르면 같다고 본다",
-        default=DEFAULT_ANGLE_TOL, min=0.0, max=math.radians(30.0), subtype='ANGLE',
-    )
-    flat_angle: FloatProperty(
-        name="Flat Angle",
-        description="이웃한 면의 법선 차이가 이 이내면 같은 평면으로 묶는다",
-        default=DEFAULT_FLAT, min=0.0, max=math.radians(30.0), subtype='ANGLE',
-    )
     pick: BoolProperty(options={'HIDDEN', 'SKIP_SAVE'}, default=False)
-    seed_object: StringProperty(options={'HIDDEN'})     # 마우스로 고른 면 (다시 실행/리두에서 쓴다)
-    seed_face: IntProperty(default=-1, options={'HIDDEN'})
+    seed_object: StringProperty(options={'HIDDEN', 'SKIP_SAVE'})     # 마우스로 고른 면
+    seed_face: IntProperty(default=-1, options={'HIDDEN', 'SKIP_SAVE'})
+    refresh: BoolProperty(options={'HIDDEN', 'SKIP_SAVE'}, default=False)   # 패널 옵션이 바뀌어 같은 기준 면으로 다시 찾기
 
     @classmethod
     def poll(cls, context):
@@ -430,19 +400,35 @@ class MESH_OT_mirror_face_similar(bpy.types.Operator):
         return self.execute(context)
 
     def execute(self, context):
+        opt = similar_options(context)
         objs = list(context.objects_in_mode_unique_data)
 
-        # 1) 기준이 되는 면: 마우스로 고른 면, 없으면 선택한 면
+        # 0) 옵션이 바뀌어 다시 찾는 경우: 처음 찾기 전 선택으로 돌아가 같은 기준 면에서 다시 시작한다.
+        prev = state.similar if self.refresh else None
+        if self.refresh:
+            if prev is None or not similar_valid(context):
+                state.reset_similar()
+                return {'CANCELLED'}
+            restore_selection(objs, prev['snap'])
+            snap = prev['snap']
+        else:
+            snap = snapshot_selection(objs)
+
+        # 1) 기준이 되는 면: 다시 찾기면 처음 기준 면, 아니면 마우스로 고른 면, 없으면 선택한 면
         #    (bm 래퍼를 들고 있어야 한다. 변수를 덮어써서 래퍼가 해제되면 이미 모은 면 참조도 무효가 된다.)
         bms = [bmesh.from_edit_mesh(ob.data) for ob in objs]
-        seed_faces = []
+        seed_faces, seed_idx = [], {}
         for ob, bm in zip(objs, bms):
             bm.faces.ensure_lookup_table()
-            if self.seed_face >= 0:
-                if ob.name == self.seed_object and self.seed_face < len(bm.faces):
-                    seed_faces.append(bm.faces[self.seed_face])
+            if prev is not None:
+                picked = [bm.faces[i] for i in prev['seeds'].get(ob.name, ()) if i < len(bm.faces)]
+            elif self.seed_face >= 0:
+                picked = ([bm.faces[self.seed_face]]
+                          if ob.name == self.seed_object and self.seed_face < len(bm.faces) else [])
             else:
-                seed_faces.extend(f for f in bm.faces if f.select and not f.hide)
+                picked = [f for f in bm.faces if f.select and not f.hide]
+            seed_faces.extend(picked)
+            seed_idx[ob.name] = [f.index for f in picked]
         if not seed_faces:
             self.report({'WARNING'}, "기준이 될 면을 선택하거나 Alt+더블클릭으로 면을 가리키세요")
             return {'CANCELLED'}
@@ -452,9 +438,9 @@ class MESH_OT_mirror_face_similar(bpy.types.Operator):
         for f in seed_faces:
             if f in seen:
                 continue
-            isl = flat_island(f, self.flat_angle) if self.use_island else {f}
+            isl = flat_island(f, opt.flat_angle) if opt.use_island else {f}
             seen |= isl
-            shp = island_shape(isl, self.scale_invariant)
+            shp = island_shape(isl, opt.scale_invariant)
             if shp is not None:
                 shapes.append(shp)
         if not shapes:
@@ -463,24 +449,32 @@ class MESH_OT_mirror_face_similar(bpy.types.Operator):
 
         # 3) 모든 편집 중인 오브젝트에서 같은 모양 찾기
         del seed_faces, seen
-        if not self.extend:
+        if not opt.extend:
             bpy.ops.mesh.select_all(action='DESELECT')
         regions = faces_total = 0
+        found_idx, counts = {}, {}
         for ob in objs:
             bm = bmesh.from_edit_mesh(ob.data)
             bm.faces.ensure_lookup_table()
             bm.normal_update()
-            found = similar_islands(bm, shapes, self.flat_angle, self.length_tolerance,
-                                    self.angle_tolerance, self.scale_invariant, self.use_island)
+            found = similar_islands(bm, shapes, opt.flat_angle, opt.length_tolerance,
+                                    opt.angle_tolerance, opt.scale_invariant, opt.use_island)
+            idx = set()
             for isl in found:
                 for f in isl:
                     f.select_set(True)
+                    idx.add(f.index)
                 regions += 1
                 faces_total += len(isl)
+            found_idx[ob.name] = idx
+            counts[ob.name] = mesh_counts(bm)
             bm.select_flush_mode()
             bmesh.update_edit_mesh(ob.data, loop_triangles=False, destructive=False)
 
+        state.set_similar({'seeds': seed_idx, 'snap': snap, 'found': found_idx, 'counts': counts,
+                           'regions': regions, 'faces': faces_total})
         self.report({'INFO'}, "같은 모양 %d곳 (면 %d개) 선택" % (regions, faces_total))
+        redraw_3d(context)
         return {'FINISHED'}
 
 

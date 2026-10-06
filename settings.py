@@ -20,6 +20,7 @@ import bpy
 from bpy.props import BoolProperty, EnumProperty, FloatProperty, IntProperty
 
 from . import state
+from .face_shape import DEFAULT_ANGLE_TOL, DEFAULT_FLAT, DEFAULT_LEN_TOL
 
 
 LEVEL_ITEMS = (
@@ -84,7 +85,48 @@ def _on_geometry_update(self, context):
         pass
 
 
+def _on_similar_update(self, context):
+    """같은 모양 면 선택의 옵션이 바뀌면, 방금 찾은 결과를 같은 기준 면으로 새 옵션에 맞춰 다시 찾는다."""
+    from .common import similar_valid
+    if state.similar is None or not similar_valid(context):
+        return
+    try:
+        bpy.ops.mesh.mirror_face_similar('EXEC_DEFAULT', refresh=True)
+    except RuntimeError:
+        pass
+
+
 class MLS_Settings(bpy.types.PropertyGroup):
+    similar_extend: BoolProperty(
+        name="기존 선택에 추가",
+        description="기존 선택을 지우지 않고 찾은 면을 더한다",
+        default=False, update=_on_similar_update,
+    )
+    similar_scale_invariant: BoolProperty(
+        name="크기 무시",
+        description="크기가 달라도 모양이 같으면(닮음) 찾는다",
+        default=False, update=_on_similar_update,
+    )
+    similar_use_island: BoolProperty(
+        name="평평한 영역으로 묶기",
+        description="이웃한 평평한 면들을 한 덩어리의 모양으로 비교한다. 끄면 면 하나씩 비교한다",
+        default=True, update=_on_similar_update,
+    )
+    similar_length_tolerance: FloatProperty(
+        name="길이 허용 오차",
+        description="변 길이가 이 비율 이내로 다르면 같다고 본다 (0.01 = 1%)",
+        default=DEFAULT_LEN_TOL, min=0.0, max=0.5, precision=3, update=_on_similar_update,
+    )
+    similar_angle_tolerance: FloatProperty(
+        name="각도 허용 오차",
+        description="꺾임 각이 이 이내로 다르면 같다고 본다",
+        default=DEFAULT_ANGLE_TOL, min=0.0, max=math.radians(30.0), subtype='ANGLE', update=_on_similar_update,
+    )
+    similar_flat_angle: FloatProperty(
+        name="평면 판정 각도",
+        description="이웃한 면의 법선 차이가 이 이내면 같은 평면으로 묶는다",
+        default=DEFAULT_FLAT, min=0.0, max=math.radians(30.0), subtype='ANGLE', update=_on_similar_update,
+    )
     max_turn_angle: FloatProperty(
         name="최대 꺾임 각도",
         description="극점/삼각형에서 루프가 꺾여도 계속 진행할 최대 각도 (클수록 더 멀리 감). "
@@ -140,6 +182,19 @@ def geometry_options(context):
     """루프 걷기 규칙: (최대 꺾임 각도, 다이헤드럴 사용). 설정이 아직 없으면 기본값."""
     s = get_settings(context)
     return (DEFAULT_MAX_ANGLE, True) if s is None else (s.max_turn_angle, s.use_dihedral)
+
+
+def similar_options(context):
+    """같은 모양 면 선택 옵션 (설정이 아직 없으면 기본값)."""
+    from types import SimpleNamespace
+    s = get_settings(context)
+    if s is None:
+        return SimpleNamespace(extend=False, scale_invariant=False, use_island=True, length_tolerance=DEFAULT_LEN_TOL,
+                               angle_tolerance=DEFAULT_ANGLE_TOL, flat_angle=DEFAULT_FLAT)
+    return SimpleNamespace(
+        extend=s.similar_extend, scale_invariant=s.similar_scale_invariant, use_island=s.similar_use_island,
+        length_tolerance=s.similar_length_tolerance, angle_tolerance=s.similar_angle_tolerance,
+        flat_angle=s.similar_flat_angle)
 
 
 def extension_enabled(context):
