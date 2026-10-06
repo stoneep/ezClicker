@@ -117,13 +117,16 @@ class MLS_Settings(bpy.types.PropertyGroup):
         description="이웃한 면의 각도 차이가 이보다 크면 다른 덩어리로 나눈다. "
                     "베벨 조각 하나의 꺾임보다는 크게, 바닥과 만나는 모서리보다는 작게 잡는다",
         default=DEFAULT_DELIMIT, min=math.radians(5.0), max=math.radians(89.0), subtype='ANGLE',
+        # 드래그 속도는 soft 범위에 비례한다: 자주 쓰는 구간만 soft 로 잡아 느리게, 화살표/Ctrl+휠은 1° 씩, 표시는 소수 첫째 자리까지.
+        soft_min=math.radians(10.0), soft_max=math.radians(75.0), step=100, precision=1,
         update=_on_similar_update,
     )
     similar_curve_tolerance: FloatProperty(
         name="곡선 허용 오차",
-        description="경계 곡선을 비교할 때 허용하는 차이(평균 반지름 대비). 원을 적게 나눈 쪽은 다각형이라 "
-                    "크면 클수록 폴리 수가 많이 다른 것도 같다고 본다",
-        default=DEFAULT_CURVE_TOL, min=0.005, max=0.3, precision=3, update=_on_similar_update,
+        description="경계 곡선을 비교할 때 허용하는 차이(평균 반지름 대비 %). 원을 적게 나눈 쪽은 다각형이라 "
+                    "크면 클수록 폴리 수가 많이 다른 것도 같다고 본다. 화살표/Ctrl+휠은 0.5% 씩",
+        default=DEFAULT_CURVE_TOL * 100.0, min=0.5, max=30.0, soft_max=15.0, subtype='PERCENTAGE',
+        step=50, precision=1, update=_on_similar_update,
     )
     similar_extend: BoolProperty(
         name="기존 선택에 추가",
@@ -142,24 +145,28 @@ class MLS_Settings(bpy.types.PropertyGroup):
     )
     similar_length_tolerance: FloatProperty(
         name="길이 허용 오차",
-        description="변 길이가 이 비율 이내로 다르면 같다고 본다 (0.01 = 1%)",
-        default=DEFAULT_LEN_TOL, min=0.0, max=0.5, precision=3, update=_on_similar_update,
+        description="변 길이가 이 비율(%) 이내로 다르면 같다고 본다. 화살표/Ctrl+휠은 0.1% 씩",
+        default=DEFAULT_LEN_TOL * 100.0, min=0.0, max=50.0, soft_max=10.0, subtype='PERCENTAGE',
+        step=10, precision=2, update=_on_similar_update,
     )
     similar_angle_tolerance: FloatProperty(
         name="각도 허용 오차",
         description="꺾임 각이 이 이내로 다르면 같다고 본다",
-        default=DEFAULT_ANGLE_TOL, min=0.0, max=math.radians(30.0), subtype='ANGLE', update=_on_similar_update,
+        default=DEFAULT_ANGLE_TOL, min=0.0, max=math.radians(30.0), subtype='ANGLE',
+        soft_max=math.radians(10.0), step=10, precision=2, update=_on_similar_update,
     )
     similar_flat_angle: FloatProperty(
         name="평면 판정 각도",
         description="이웃한 면의 법선 차이가 이 이내면 같은 평면으로 묶는다",
-        default=DEFAULT_FLAT, min=0.0, max=math.radians(30.0), subtype='ANGLE', update=_on_similar_update,
+        default=DEFAULT_FLAT, min=0.0, max=math.radians(30.0), subtype='ANGLE',
+        soft_max=math.radians(10.0), step=10, precision=2, update=_on_similar_update,
     )
     max_turn_angle: FloatProperty(
         name="최대 꺾임 각도",
         description="극점/삼각형에서 루프가 꺾여도 계속 진행할 최대 각도 (클수록 더 멀리 감). "
                     "바꾸면 방금 고른 루프를 다시 계산한다",
         default=DEFAULT_MAX_ANGLE, min=0.0, max=math.radians(120.0), subtype='ANGLE',
+        soft_min=math.radians(20.0), soft_max=math.radians(90.0), step=100, precision=1,
         update=_on_geometry_update,
     )
     use_dihedral: BoolProperty(
@@ -222,9 +229,9 @@ def similar_options(context):
                                patch_angle=DEFAULT_DELIMIT, curve_tolerance=DEFAULT_CURVE_TOL)
     return SimpleNamespace(
         extend=s.similar_extend, scale_invariant=s.similar_scale_invariant, use_island=s.similar_use_island,
-        length_tolerance=s.similar_length_tolerance, angle_tolerance=s.similar_angle_tolerance,
+        length_tolerance=s.similar_length_tolerance / 100.0, angle_tolerance=s.similar_angle_tolerance,
         flat_angle=s.similar_flat_angle, mode=s.similar_mode, patch_angle=s.similar_patch_angle,
-        curve_tolerance=s.similar_curve_tolerance)
+        curve_tolerance=s.similar_curve_tolerance / 100.0)
 
 
 def extension_enabled(context):
