@@ -27,6 +27,7 @@ adjust = None
 similar = None
 similar_edge = None
 keymap_items = []
+last_info = None      # 마지막 루프 선택이 어떤 규칙으로 몇 개를 골랐는지(상태 표시줄 안내용)
 
 
 def reset_wheel():

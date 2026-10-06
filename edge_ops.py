@@ -65,6 +65,7 @@ def run_selection(context, p):
     """
     state.reset_wheel()
     state.reset_adjust()
+    state.last_info = None
     ob = next((o for o in context.objects_in_mode_unique_data if o.name == p.seed_object), None)
     if ob is None or p.seed_edge < 0:
         return 'CANCELLED', "Alt+클릭으로 루프를 선택해야 이 패널을 쓸 수 있습니다"
@@ -126,6 +127,9 @@ def run_selection(context, p):
     bm.select_flush_mode()
 
     # 선택한 경우에만 '사이 채우기' 앵커, 휠 확장 상태, 고정 패널용 조절 상태를 저장한다.
+    state.last_info = "루프 엣지 %d개 %s (%s)" % (
+        len(loop) + len(mirror), "선택" if p.do_select else "해제",
+        "테두리 확정" if sl['outline'] else "루프 따라가기")
     if p.do_select:
         state.set_anchor(ob.name, seed.index, mesh_counts(bm))
         core = {e.index for e in loop} | {e.index for e in mirror}
@@ -259,6 +263,8 @@ class MESH_OT_mirror_loop_select(bpy.types.Operator):
         status, msg = run_selection(context, self)
         if msg:
             self.report({'WARNING'}, msg)
+        elif state.last_info:
+            self.report({'INFO'}, state.last_info)
         return {status}
 
 
