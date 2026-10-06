@@ -2,7 +2,7 @@
 edge_ops.py — [엣지] 오퍼레이터와 키맵.
 
   Alt+클릭            : 루프 선택 (기본 루프 선택과 동일)        -> MESH_OT_mirror_loop_select
-  Ctrl+Shift+Alt+클릭 : 루프 선택 추가/해제 (토글)                 -> MESH_OT_mirror_loop_select
+  Shift+Alt+클릭      : 루프 선택 추가/해제 (토글)                 -> MESH_OT_mirror_loop_select
   Alt+휠                  : 위·아래 루프 동시 확장/축소          -> MESH_OT_mirror_loop_step
   Ctrl+휠                 : 한 방향 확장/축소                    -> MESH_OT_mirror_loop_step
 
@@ -215,7 +215,7 @@ class MESH_OT_mirror_loop_select(bpy.types.Operator):
                 removed = before[ob] - after
             if added:
                 return ob, pick_seed(context, ob, bm, added, mouse).index, True, added
-            if removed:        # Ctrl+Shift+Alt 토글로 해제된 경우
+            if removed:        # Shift+Alt 토글로 해제된 경우
                 return ob, pick_seed(context, ob, bm, removed, mouse).index, False, removed
         return None
 
@@ -510,7 +510,7 @@ KEYMAPS = (
      "루프 선택",
      "극점·삼각형을 지나 끝까지, 미러 반대편까지"),
     (MESH_OT_mirror_loop_select.bl_idname, 'LEFTMOUSE', 'PRESS',
-     {'ctrl': True, 'shift': True, 'alt': True}, {'toggle': True},
+     {'shift': True, 'alt': True}, {'toggle': True},
      "루프 선택 추가/해제",
      "선택한 루프는 해제, 아니면 추가"),
 

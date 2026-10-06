@@ -3,7 +3,7 @@ face_ops.py — [면] 오퍼레이터와 키맵.
 
   Ctrl+Alt+클릭  : 마지막으로 고른 루프 ~ 클릭한 루프 사이 '전부' 선택
                    (사이의 모든 버텍스·엣지·면. select_faces=True)
-  Shift+Alt+클릭 : 같은 구간에서 '루프(엣지)만' 선택 (사이의 면·루프와 직각인 테두리는 제외. select_faces=False)
+  Ctrl+Shift+Alt+클릭 : 같은 구간에서 '루프(엣지)만' 선택 (사이의 면·루프와 직각인 테두리는 제외. select_faces=False)
                    -> 둘 다 MESH_OT_mirror_loop_between (키맵의 select_faces 값만 다르다)
 
   면 모드: 첫 클릭은 아무것도 선택하지 않고 시작 루프만 지정한다. 지정한 루프는 색 선으로 표시되고(overlay.py,
@@ -347,7 +347,7 @@ class MESH_OT_mirror_loop_between(bpy.types.Operator):
         bm.select_flush_mode()
         bmesh.update_edit_mesh(ob.data, loop_triangles=False, destructive=False)
 
-        # 끝 루프를 새 앵커로 -> 이어서 Ctrl+Alt+클릭(또는 Shift+Alt+클릭)하면 B~C 구간이 선택된다.
+        # 끝 루프를 새 앵커로 -> 이어서 Ctrl+Alt+클릭(또는 Ctrl+Shift+Alt+클릭)하면 B~C 구간이 선택된다.
         pending = not (selected or faces)       # 면 모드 첫 클릭처럼 아무것도 선택하지 않고 대기만 하는 경우
         state.set_anchor(ob.name, seed_b.index, counts, selected=not pending, loop=target if pending else None)
         redraw_3d(context)
@@ -544,7 +544,7 @@ KEYMAPS = (
      {'select_faces': True},
      "사이 전부 선택",
      "시작 루프~클릭한 루프 사이의 모든 버텍스·엣지·면"),
-    (MESH_OT_mirror_loop_between.bl_idname, 'LEFTMOUSE', 'PRESS', {'shift': True, 'alt': True},
+    (MESH_OT_mirror_loop_between.bl_idname, 'LEFTMOUSE', 'PRESS', {'ctrl': True, 'shift': True, 'alt': True},
      {'select_faces': False},
      "사이 루프만 선택",
      "시작 루프~클릭한 루프 사이의 루프(엣지)만, 면은 제외"),
