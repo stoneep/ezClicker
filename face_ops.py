@@ -45,8 +45,7 @@ from mathutils.bvhtree import BVHTree
 from . import prefs, state
 from .common import (adjust_valid, ensure_tables, face_only_mode, get_mirror_axes, mesh_counts, pick_seed,
                      redraw_3d, restore_selection, screen_mid, screen_score, similar_valid, snapshot_selection)
-from .edge_core import find_mirror_edges, walk_loop
-from .edge_range import ADJUST_LENGTH_MIN, ADJUST_STEP_MAX, find_between
+from .edge_range import ADJUST_LENGTH_MIN, ADJUST_STEP_MAX, find_between, selected_loop
 from .face_core import order_strip, strip_faces, strip_rails, strip_region
 from .face_patch import diagnose_seed, patch_seed_shapes, similar_patches
 from .face_shape import flat_island, island_shape, similar_islands
@@ -295,8 +294,9 @@ class MESH_OT_mirror_loop_between(bpy.types.Operator):
         # 1단계에서는 미러 반대편을 확장하지 않는다.
         axes = get_mirror_axes(ob) if use_mirror_extension(context) else []
         seed_b = bm.edges[seed_b_idx]
-        loop_b = walk_loop(seed_b, cos_limit, dih)
-        mirror_b = find_mirror_edges(bm, loop_b, axes, self.threshold, cos_limit, dih) if axes else []
+        # 클릭한 루프는 Alt+클릭(루프 선택)과 같은 규칙으로 정한다. (쪼개진 면의 테두리 확정, 미러 확장 포함: edge_range.selected_loop)
+        sl = selected_loop(bm, seed_b, cos_limit, dih, 0, axes, self.threshold)
+        loop_b, mirror_b = sl['loop'], sl['mirror']
         target = {e.index for e in loop_b} | {e.index for e in mirror_b}
 
         # 2) 시작 루프(앵커) 확인
