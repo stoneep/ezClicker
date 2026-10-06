@@ -380,7 +380,7 @@ class VIEW3D_PT_mirror_loop_spread(bpy.types.Panel):
 
 
 class VIEW3D_PT_mirror_loop_marked(bpy.types.Panel):
-    """마크 엣지만 선택: A 로 전체 선택한 뒤 Seam / Sharp 로 마크한 엣지만 남기는 토글 버튼."""
+    """마크 엣지만 선택: 선택한 범위(없으면 전체)에서 Seam / Sharp 로 마크한 엣지만 남기는 토글 버튼."""
     bl_label = "마크 엣지만 선택"
     bl_idname = "VIEW3D_PT_mirror_loop_marked"
     bl_space_type = 'VIEW_3D'
@@ -406,8 +406,8 @@ class VIEW3D_PT_mirror_loop_marked(bpy.types.Panel):
         if active is not None:
             layout.label(text="%d개 선택 · 한 번 더 누르면 원래 선택" % info['n'], icon='CHECKMARK')
         else:
-            layout.label(text="A 로 전체 선택한 뒤 누르세요")
-            layout.label(text="(선택이 없으면 전체에서 찾습니다)")
+            layout.label(text="드래그 / A 로 범위를 선택한 뒤 누르세요")
+            layout.label(text="(범위에 마크가 없으면 전체에서 찾습니다)")
 
 
 def draw_header_button(self, context):

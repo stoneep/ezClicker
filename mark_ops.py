@@ -3,7 +3,8 @@ mark_ops.py — [엣지] Seam / Sharp 로 마크한 엣지만 골라 선택하�
 
 A 로 전체 선택한 뒤 버튼을 누르면 선택이 '마크한 엣지만' 으로 줄어든다. 같은 버튼을 한 번 더 누르면 누르기 전 선택으로 돌아간다. (토글)
   - Seam 만 / Sharp 만 / 둘 다 (Seam 이거나 Sharp)
-  - 지금 선택한 엣지 안에서 고른다. 선택한 엣지가 하나도 없으면 보이는 모든 엣지에서 고른다.
+  - 지금 선택한 범위(드래그 / 박스 / 전체 선택) 안에서 먼저 찾는다.
+    그 범위에 마크한 엣지가 없거나 선택이 아예 없으면 보이는 모든 엣지에서 찾고(폴백), 거기에도 없으면 경고만 띄우고 선택은 그대로 둔다.
   - Seam 을 켠 채 Sharp 를 누르면 누르기 전 선택으로 되돌린 뒤 거기서 Sharp 만 고른다. (필터가 겹쳐서 줄어들지 않는다)
   - 엣지 모드에서 쓴다. 버텍스나 면 모드에서는 마크 엣지만 따로 선택해도 이웃 엣지가 따라 선택돼 의미가 없다.
 """
@@ -65,7 +66,7 @@ def marked_valid(context, exact=True):
 
 
 class MESH_OT_mirror_select_marked(bpy.types.Operator):
-    """선택한 엣지(없으면 전체) 중 Seam / Sharp 로 마크한 엣지만 남긴다. 같은 버튼을 한 번 더 누르면 원래 선택으로 돌아간다"""
+    """선택한 범위(없으면 전체) 중 Seam / Sharp 로 마크한 엣지만 남긴다. 같은 버튼을 한 번 더 누르면 원래 선택으로 돌아간다"""
     bl_idname = "mesh.mirror_select_marked"
     bl_label = "Select Marked Edges"
     bl_options = {'UNDO'}
@@ -94,26 +95,37 @@ class MESH_OT_mirror_select_marked(bpy.types.Operator):
         else:
             snap = snapshot_selection(objs)
 
-        pools, total = {}, 0          # 오브젝트별 고른 엣지의 인덱스 (BMEdge 는 아래 select_all 뒤에 무효가 된다)
-        any_selected = False
+        any_selected = False          # 선택한 범위(드래그 / 박스 / A 전체 선택 모두)가 있는지
         for ob in objs:
             bm = bmesh.from_edit_mesh(ob.data)
             ensure_tables(bm)
             if any(e.select and not e.hide for e in bm.edges):
                 any_selected = True
-        found, counts = {}, {}
-        for ob in objs:
-            bm = bmesh.from_edit_mesh(ob.data)
-            ensure_tables(bm)
-            pool = [e for e in bm.edges if not e.hide and (e.select or not any_selected)]
-            keep = [e.index for e in pool if is_marked(e, self.kind)]
-            pools[ob] = keep
-            total += len(keep)
-            counts[ob.name] = mesh_counts(bm)
+
+        def collect(only_selected):
+            """오브젝트별로 마크한 엣지의 인덱스를 모은다 (BMEdge 는 아래 select_all 뒤에 무효가 되므로 인덱스로)."""
+            pools, total, counts = {}, 0, {}
+            for ob in objs:
+                bm = bmesh.from_edit_mesh(ob.data)
+                ensure_tables(bm)
+                keep = [e.index for e in bm.edges if not e.hide and (e.select or not only_selected) and is_marked(e, self.kind)]
+                pools[ob] = keep
+                total += len(keep)
+                counts[ob.name] = mesh_counts(bm)
+            return pools, total, counts
+
+        whole = not any_selected       # 전체에서 찾았는지 (선택이 없었거나, 선택한 범위에 마크가 없어 폴백한 경우)
+        pools, total, counts = collect(any_selected)
+        fallback = False
+        if total == 0 and any_selected:                     # 선택한 범위에 마크가 없다 → 전체에서 찾는다 (폴백)
+            pools, total, counts = collect(False)
+            fallback = whole = total > 0
+        found = {}
         if total == 0:
             if active:
                 state.reset_marked()
-            self.report({'WARNING'}, "%s 로 마크한 엣지가 %s 없습니다" % (KIND_TEXT[self.kind], "선택한 엣지 중에" if any_selected else ""))
+            self.report({'WARNING'}, "%s 로 마크한 엣지가 없습니다 (%s 모두 확인했습니다)" % (
+                KIND_TEXT[self.kind], "선택한 범위와 전체를" if any_selected else "전체를"))
             return {'CANCELLED'}
 
         bpy.ops.mesh.select_all(action='DESELECT')
@@ -129,9 +141,10 @@ class MESH_OT_mirror_select_marked(bpy.types.Operator):
             found[ob.name] = idx
 
         state.set_marked({'kind': self.kind, 'snap': snap, 'found': found, 'counts': counts, 'n': total,
-                          'whole': not any_selected})
+                          'whole': whole, 'fallback': fallback})
         self.report({'INFO'}, "%s 마크 엣지 %d개만 선택했습니다 (%s)" % (
-            KIND_TEXT[self.kind], total, "선택한 엣지 중" if any_selected else "전체에서"))
+            KIND_TEXT[self.kind], total,
+            "선택한 범위에 없어 전체에서 찾았습니다" if fallback else ("전체에서" if whole else "선택한 범위 중")))
         redraw_3d(context)
         return {'FINISHED'}
 
