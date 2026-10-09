@@ -14,6 +14,7 @@ Edit > Preferences > Add-ons > Mirror Loop Select 에서 연다.
 """
 
 import bpy
+from bpy.props import FloatProperty, FloatVectorProperty
 
 from . import state
 
@@ -95,10 +96,31 @@ def find_conflicts(kmi, limit=3):
     return out
 
 
+def get_prefs(context=None):
+    """이 애드온의 환경설정. 아직 활성화 전이면 None."""
+    context = context or bpy.context
+    addon = context.preferences.addons.get(__package__)
+    return addon.preferences if addon else None
+
+
 class MLS_Preferences(bpy.types.AddonPreferences):
     bl_idname = __package__
 
+    anchor_color: FloatVectorProperty(
+        name="시작 루프 표시 색",
+        description="면 모드 사이 선택에서 첫 클릭으로 지정한 시작 루프(대기 중)를 3D 뷰에 겹쳐 그리는 색",
+        subtype='COLOR', size=4, min=0.0, max=1.0, default=(1.0, 0.25, 0.1, 1.0),
+    )
+    anchor_width: FloatProperty(
+        name="시작 루프 표시 두께",
+        description="시작 루프 표시 선의 두께(픽셀)",
+        default=4.0, min=1.0, max=20.0,
+    )
+
     def draw(self, context):
+        col = self.layout.column(align=True)
+        col.prop(self, "anchor_color")
+        col.prop(self, "anchor_width")
         box = self.layout.box()
         box.label(text="기능 / 단축키", icon='EVENT_A')
         if not state.keymap_items:

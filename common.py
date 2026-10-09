@@ -8,6 +8,25 @@ common.py — 엣지/면 양쪽이 함께 쓰는 공통 유틸.
 import bmesh
 from bpy_extras import view3d_utils
 
+from . import state
+
+
+def redraw_3d(context):
+    """모든 3D 뷰를 다시 그리게 한다. (표시용 오버레이가 바뀌었을 때)"""
+    wm = context.window_manager
+    for win in wm.windows:
+        for area in win.screen.areas:
+            if area.type == 'VIEW_3D':
+                area.tag_redraw()
+
+
+def face_only_mode(context):
+    """선택 모드가 '면' 하나뿐이면 True. (버텍스·엣지 모드가 같이 켜져 있으면 False)
+
+    면 전용 모드에서는 엣지만 선택하는 동작이 의미가 없다. 엣지 선택 상태가 화면에 보이지 않은 채 남기 때문이다.
+    """
+    return tuple(context.tool_settings.mesh_select_mode) == (False, False, True)
+
 
 def get_mirror_axes(obj):
     """편집 모드 Symmetry(use_mirror_x/y/z)와 Mirror 모디파이어의 축을 모두 모은다."""
@@ -94,6 +113,8 @@ def snapshot_selection(objs):
 
 def restore_selection(objs, snap):
     for ob in objs:
+        if ob not in snap:
+            continue                      # 기록 당시와 다른 오브젝트(같은 이름으로 다시 만든 경우 등)는 건드리지 않는다
         bm = bmesh.from_edit_mesh(ob.data)
         bm.verts.ensure_lookup_table()
         bm.edges.ensure_lookup_table()
@@ -113,3 +134,106 @@ def restore_selection(objs, snap):
             bm.faces[i].select_set(True)
         bm.select_flush_mode()
         bmesh.update_edit_mesh(ob.data, loop_triangles=False, destructive=False)
+
+
+def adjust_mode(adj=None):
+    """고정 패널 조절 상태의 종류: 'EDGE'(엣지/버텍스 모드에서 고른 루프) 또는 'FACE'(면 모드 Alt+클릭으로 고른 면 줄)."""
+    adj = adj or state.adjust
+    return None if adj is None else adj.get('mode', 'EDGE')
+
+
+def adjust_valid(context):
+    """
+    고정 패널이 조절할 수 있는 상태인지: 마지막 루프 선택의 메시와 선택이 그대로인지 가볍게 확인한다.
+
+    EDGE : 엣지/버텍스 모드이고, 기준 루프의 엣지가 아직 선택돼 있다.
+    FACE : 면 전용 모드이고, 면 루프 선택으로 고른 면이 아직 선택돼 있다.
+    """
+    adj = state.adjust
+    ob = context.edit_object
+    if adj is None or ob is None or context.mode != 'EDIT_MESH' or ob.name != adj['ob']:
+        return False
+    face_mode = face_only_mode(context)
+    bm = bmesh.from_edit_mesh(ob.data)
+    if mesh_counts(bm) != adj['counts']:
+        return False
+    if adjust_mode(adj) == 'FACE':
+        if not face_mode:
+            return False
+        bm.faces.ensure_lookup_table()
+        faces = bm.faces
+        return all(faces[i].select for i in adj['added'])
+    if face_mode:
+        return False
+    bm.edges.ensure_lookup_table()
+    edges = bm.edges
+    return all(edges[i].select for i in adj['core'])
+
+
+def similar_valid(context):
+    """마지막 '같은 모양 면 선택' 결과가 그대로인지: 편집 중이고, 메시가 같고, 찾은 면이 아직 선택돼 있다."""
+    info = state.similar
+    if info is None or context.mode != 'EDIT_MESH':
+        return False
+    for ob in context.objects_in_mode_unique_data:
+        if ob.name not in info['counts']:
+            return False
+        bm = bmesh.from_edit_mesh(ob.data)
+        if mesh_counts(bm) != info['counts'][ob.name]:
+            return False
+        bm.faces.ensure_lookup_table()
+        faces = bm.faces
+        if not all(faces[i].select for i in info['found'].get(ob.name, ())):
+            return False
+    return True
+
+
+def similar_edge_valid(context):
+    """마지막 '같은 모양 엣지 루프' 결과가 그대로인지: 편집 중이고, 메시가 같고, 찾은 엣지가 아직 선택돼 있다."""
+    info = state.similar_edge
+    if info is None or context.mode != 'EDIT_MESH':
+        return False
+    for ob in context.objects_in_mode_unique_data:
+        if ob.name not in info['counts']:
+            return False
+        bm = bmesh.from_edit_mesh(ob.data)
+        if mesh_counts(bm) != info['counts'][ob.name]:
+            return False
+        bm.edges.ensure_lookup_table()
+        edges = bm.edges
+        if not all(edges[i].select for i in info['found'].get(ob.name, ())):
+            return False
+    return True
+
+
+def pick_vertex(context, ob, verts, mouse):
+    """verts 중 마우스에 가장 가까운 버텍스 (화면 좌표 기준). 화면 정보가 없으면 첫 버텍스."""
+    region, rv3d = context.region, context.region_data
+    best, best_d = None, None
+    if region is not None and rv3d is not None:
+        mw = ob.matrix_world
+        for v in verts:
+            p = view3d_utils.location_3d_to_region_2d(region, rv3d, mw @ v.co)
+            if p is not None:
+                d = (p - mouse).length
+                if best_d is None or d < best_d:
+                    best, best_d = v, d
+    return best if best is not None else next(iter(verts))
+
+
+def spread_valid(context):
+    """마지막 '버텍스에서 퍼뜨리기' 결과가 그대로인지: 편집 중이고, 메시가 같고, 선택한 버텍스가 아직 선택돼 있다."""
+    info = state.spread
+    if info is None or context.mode != 'EDIT_MESH':
+        return False
+    for ob in context.objects_in_mode_unique_data:
+        if ob.name not in info['counts']:
+            return False
+        bm = bmesh.from_edit_mesh(ob.data)
+        if mesh_counts(bm) != info['counts'][ob.name]:
+            return False
+        bm.verts.ensure_lookup_table()
+        verts = bm.verts
+        if not all(verts[i].select for i in info['found'].get(ob.name, ())):
+            return False
+    return True

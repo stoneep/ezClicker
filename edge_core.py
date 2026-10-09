@@ -230,6 +230,56 @@ def walk_loop(seed, cos_limit, dih=True):
     return loop
 
 
+def walk_loop_ordered(seed, cos_limit, dih=True, ref_dir=None):
+    """
+    walk_loop 와 같은 루프를 '순서대로' 걷는다: (엣지 리스트, 씨앗의 위치, 닫힌 고리 여부, 씨앗의 진행 방향).
+    ref_dir 을 주면 씨앗을 그 방향과 같은 쪽으로 읽는다. (나란한 루프끼리 읽는 방향을 맞출 때 쓴다)
+    """
+    a, b = seed.verts
+    if ref_dir is not None and (b.co - a.co).dot(ref_dir) < 0.0:
+        a, b = b, a
+    seen = {seed}
+
+    def run(v, e):
+        out, closed = [], False
+        while True:
+            ne = next_edge(v, e, cos_limit, dih)
+            if ne is None:
+                break
+            if ne in seen:
+                closed = ne is seed          # 한 바퀴 돌아 씨앗으로 돌아옴
+                break
+            seen.add(ne)
+            out.append(ne)
+            v = ne.other_vert(v)
+            e = ne
+        return out, closed
+
+    fwd, closed = run(b, seed)
+    bwd, _ = run(a, seed)
+    return bwd[::-1] + [seed] + fwd, len(bwd), closed, (b.co - a.co)
+
+
+def trim_window(chain, seed_pos, closed, keep):
+    """chain 에서 씨앗(seed_pos)을 가운데로 keep 개를 고른다. 닫힌 고리는 돌아서 잇고, 열린 루프는 끝에서 멈춘다."""
+    n = len(chain)
+    keep = max(1, min(keep, n))
+    if keep >= n:
+        return list(chain)
+    before = (keep - 1) // 2
+    if closed:
+        s = seed_pos - before
+        return [chain[(s + i) % n] for i in range(keep)]
+    s = max(0, min(seed_pos - before, n - keep))
+    return chain[s:s + keep]
+
+
+def trimmed_loop(seed, cos_limit, dih, keep, ref_dir=None):
+    """씨앗을 가운데로 루프를 keep 개 엣지로 줄인다: (엣지 리스트, 전체 엣지 수, 씨앗의 진행 방향)."""
+    chain, pos, closed, d = walk_loop_ordered(seed, cos_limit, dih, ref_dir)
+    return trim_window(chain, pos, closed, keep), len(chain), d
+
+
 # ---------------------------------------------------------------------------
 # 미러 확장
 # ---------------------------------------------------------------------------

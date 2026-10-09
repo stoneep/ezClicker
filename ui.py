@@ -5,6 +5,8 @@ ui.py — 확장 단계 전환 UI와 기능 메뉴 (3D 뷰포트 헤더 버튼 /
   - 헤더 버튼         : 팝오버 패널 (VIEW3D_PT_mirror_loop_select)
   - 우클릭 메뉴 맨 아래 : 서브메뉴 (MESH_MT_mirror_loop_level)
   - 팝업 단축키        : 같은 패널을 마우스 위치에 띄운다 (wm.call_panel, 열린 채로 여러 항목을 바꿀 수 있다)
+또 하나, 사이드바(N)의 'Mirror Loop' 탭(VIEW3D_PT_mirror_loop_adjust)은 마지막 루프 선택의 폭/길이/링을 +/- 로 고치는
+고정 패널이다. 면 모드에서는 Blender 기본 Alt+클릭(면 루프 선택)으로 고른 면 줄의 폭/길이를 조절한다. 팝업과 달리 마우스가 벗어나도, 휠을 돌려도 닫히지 않는다. (열고 닫기: mesh.mirror_loop_panel, 임시 키 Alt+1)
 
 본문 구성
   1) 확장 단계 버튼
@@ -16,9 +18,11 @@ ui.py — 확장 단계 전환 UI와 기능 메뉴 (3D 뷰포트 헤더 버튼 /
 """
 
 import bpy
-from bpy.props import BoolProperty, EnumProperty, IntProperty
+from bpy.props import EnumProperty
 
 from . import prefs, state
+from .mark_ops import KINDS as MARK_KINDS, edge_mode, marked_valid
+from .common import adjust_mode, adjust_valid, face_only_mode, similar_edge_valid, similar_valid, spread_valid
 from .settings import LEVEL_ICON, LEVEL_ITEMS, LEVEL_SHORT, get_settings
 
 
@@ -55,138 +59,25 @@ class MESH_OT_mirror_loop_level(bpy.types.Operator):
         return {'FINISHED'}
 
 
-def _redraw(context):
-    if context.screen:
-        for area in context.screen.areas:
-            area.tag_redraw()
-
-
-def view3d_override(context):
-    """
-    팝업/헤더에서 누른 버튼은 3D 뷰의 '작업 영역'이 아닌 곳의 컨텍스트로 실행된다.
-    화면 기준(휠 확장의 위/아래)이나 마우스 위치를 쓰는 기능은 3D 뷰 영역으로 바꿔서 실행해야 한다.
-    {window, area, region} 또는 못 찾으면 None.
-    """
-    screen = context.screen
-    if screen is None:
-        return None
-    area = context.area if (context.area and context.area.type == 'VIEW_3D') else \
-        next((a for a in screen.areas if a.type == 'VIEW_3D'), None)
-    if area is None:
-        return None
-    region = next((r for r in area.regions if r.type == 'WINDOW'), None)
-    if region is None:
-        return None
-    return {'window': context.window, 'area': area, 'region': region}
-
-
-def _call(context, idname, props, mode='INVOKE_DEFAULT'):
-    """'mesh.xxx' 형태 idname 의 오퍼레이터를 3D 뷰 컨텍스트로 호출한다."""
-    group, name = idname.split(".")
-    func = getattr(getattr(bpy.ops, group), name)
-    ov = view3d_override(context)
-    if ov is None:
-        return func(mode, **props)
-    with context.temp_override(**ov):
-        return func(mode, **props)
-
-
-def _set_hint(context, text):
-    """대기 중임을 알린다: 상태 표시줄 글자 + 십자 커서. text 가 None 이면 되돌린다."""
-    try:
-        if context.workspace:
-            context.workspace.status_text_set(text)
-        if context.window:
-            if text is None:
-                context.window.cursor_modal_restore()
-            else:
-                context.window.cursor_modal_set('CROSSHAIR')
-    except (AttributeError, RuntimeError):
-        pass
-
-
-class MESH_OT_mirror_menu_run(bpy.types.Operator):
-    """메뉴에서 기능을 클릭으로 실행: 클릭 기능은 '다음 클릭 한 번'을 기다리고, 그 외는 바로 실행한다"""
-    bl_idname = "mesh.mirror_menu_run"
-    bl_label = "Run Mirror Loop Feature"
-    bl_options = {'INTERNAL'}
-
-    index: IntProperty(default=0, min=0)
-
-    @classmethod
-    def poll(cls, context):
-        return context.mode == 'EDIT_MESH'
-
-    def execute(self, context):
-        if self.index >= len(state.keymap_items):
-            return {'CANCELLED'}
-        entry = state.keymap_items[self.index]
-        if entry['click']:
-            if state.armed:
-                _set_hint(context, None)
-            state.arm(entry)
-            _set_hint(context, "%s: 3D 뷰에서 클릭하면 실행됩니다 (Esc = 취소)" % entry['title'])
-            _redraw(context)
-            self.report({'INFO'}, "%s: 3D 뷰를 클릭하세요 (Esc = 취소)" % entry['title'])
-            return {'FINISHED'}
-        try:
-            result = _call(context, entry['idname'], entry['props'])
-        except RuntimeError:
-            # 실행 조건이 안 맞는 경우. (예: 휠 확장은 루프를 선택한 직후에만 쓸 수 있다)
-            self.report({'WARNING'}, "지금은 '%s'을(를) 실행할 수 없습니다. 휠 확장은 루프를 막 선택한 직후에만 됩니다."
-                        % entry['title'])
-            return {'CANCELLED'}
-        _redraw(context)
-        return {'FINISHED'} if 'FINISHED' in result else {'CANCELLED'}
-
-
-class MESH_OT_mirror_armed_click(bpy.types.Operator):
-    """(내부용) 메뉴에서 대기시킨 기능을 다음 왼쪽 클릭에 실행하거나, Esc 로 취소한다"""
-    bl_idname = "mesh.mirror_armed_click"
-    bl_label = "Mirror Loop Armed Click"
-    bl_options = {'INTERNAL'}
-
-    cancel: BoolProperty(default=False)
-
-    @classmethod
-    def poll(cls, context):
-        # 대기 중이 아닐 때는 poll 이 실패해서 평소 클릭/Esc 가 그대로 동작한다.
-        return state.armed is not None and context.mode == 'EDIT_MESH'
-
-    def invoke(self, context, event):
-        armed = state.armed
-        state.disarm()
-        _set_hint(context, None)
-        _redraw(context)
-        if self.cancel or armed is None:
-            return {'FINISHED'}              # Esc 를 삼켜서 대기만 푼다
-        try:
-            result = _call(context, armed['idname'], armed['props'])
-        except RuntimeError:
-            self.report({'WARNING'}, "'%s'을(를) 실행할 수 없습니다 (확장 단계가 '끔'이거나 편집 모드가 아닙니다)" % armed['title'])
-            return {'CANCELLED'}
-        if 'FINISHED' in result:
-            return {'FINISHED'}
-        if 'PASS_THROUGH' in result:
-            return {'CANCELLED', 'PASS_THROUGH'}   # 대상이 없는 곳이면 평소 클릭으로 넘긴다
-        return {'CANCELLED'}
-
-
 POPUP_IDNAME = "wm.call_panel"      # 팝업을 여는 키맵 항목의 오퍼레이터
+PANEL_IDNAME = "mesh.mirror_loop_panel"      # 고정 패널(사이드바 탭)을 여닫는 키맵 항목의 오퍼레이터
+ADJUST_IDNAME = "mesh.mirror_loop_adjust"    # 고정 패널 숫자칸/버튼이 부르는 오퍼레이터 (엣지/버텍스 모드)
+FACE_ADJUST_IDNAME = "mesh.mirror_face_adjust"    # 같은 숫자칸이 면 모드에서 부르는 오퍼레이터
+KEY_ROW_IDNAMES = (POPUP_IDNAME, PANEL_IDNAME)     # 기능 목록 대신 위쪽 '키 입력 행'으로 따로 그리는 항목
 
 
-def popup_entry():
-    return next((e for e in state.keymap_items if e['idname'] == POPUP_IDNAME), None)
+def popup_entry(idname=POPUP_IDNAME):
+    return next((e for e in state.keymap_items if e['idname'] == idname), None)
 
 
-def draw_popup_key(layout, editable):
-    """팝업을 여는 단축키. editable 이면 키 버튼을 눌러 바로 바꾼다. 다른 단축키와 겹치면 경고한다."""
-    entry = popup_entry()
+def draw_popup_key(layout, editable, idname=POPUP_IDNAME, label="팝업 단축키"):
+    """팝업(또는 고정 패널)을 여는 단축키. editable 이면 키 버튼을 눌러 바로 바꾼다. 다른 단축키와 겹치면 경고한다."""
+    entry = popup_entry(idname)
     if entry is None:
         return
     kmi = prefs.find_user_kmi(entry)
     row = layout.row(align=True)
-    row.label(text="팝업 단축키")
+    row.label(text=label)
     if kmi is None:
         row.label(text="키맵에서 찾을 수 없음", icon='ERROR')
         return
@@ -202,28 +93,17 @@ def draw_popup_key(layout, editable):
 
 
 def draw_features(layout):
-    """
-    기능별 한 줄:  [켜기/끄기 체크]  [실행 버튼]  단축키
-      - 체크박스는 '단축키'를 켜고 끈다. 끄면 그 키는 Blender 기본 동작으로 돌아간다.
-      - 실행 버튼은 단축키와 상관없이 메뉴에서 바로 쓴다.
-        클릭 기능(▷)은 누른 뒤 3D 뷰를 한 번 클릭하면 실행되고, 나머지(▶)는 바로 실행된다.
-      - 팝업을 여는 키는 따로 그린다.
-    """
-    for index, entry in enumerate(state.keymap_items):
-        if entry['idname'] == POPUP_IDNAME:
+    """기능별 켜기/끄기 체크박스 + 현재 단축키. (바꾼 키도 반영된다.) 팝업 키는 따로 그린다."""
+    for entry in state.keymap_items:
+        if entry['idname'] in KEY_ROW_IDNAMES:
             continue
         kmi = prefs.find_user_kmi(entry)
         row = layout.row(align=True)
         if kmi is None:
             row.label(text=entry['title'], icon='ERROR')
             continue
-        split = row.split(factor=0.7, align=True)
-        left = split.row(align=True)
-        left.prop(kmi, "active", text="")
-        armed = state.armed is not None and state.armed['title'] == entry['title']
-        left.operator(MESH_OT_mirror_menu_run.bl_idname, text=entry['title'],
-                      icon='RESTRICT_SELECT_OFF' if entry['click'] else 'PLAY',
-                      depress=armed).index = index
+        split = row.split(factor=0.66, align=True)
+        split.prop(kmi, "active", text=entry['title'])
         key = split.row(align=True)
         key.active = kmi.active
         key.alignment = 'RIGHT'
@@ -237,6 +117,7 @@ def draw_panel_body(layout, s, editable=True):
               (우클릭 서브메뉴는 키 입력을 받는 버튼이 어울리지 않아 글자로만 보여준다.)
     """
     draw_popup_key(layout, editable)
+    draw_popup_key(layout, editable, PANEL_IDNAME, "고정 패널 단축키")
     layout.separator()
 
     layout.label(text="확장 단계")
@@ -261,6 +142,107 @@ def draw_panel_body(layout, s, editable=True):
     layout.operator("preferences.addon_show", text="환경설정 (단축키 변경)", icon='PREFERENCES').module = __package__
 
 
+# ---------------------------------------------------------------------------
+# 고정 패널: 사이드바(N) > Mirror Loop 탭
+# ---------------------------------------------------------------------------
+
+def draw_adjust(layout, context):
+    """고정 패널 본문. state.adjust (마지막 루프 선택)의 값을 보여주고 +/- 로 바꾼다."""
+    entry = popup_entry(PANEL_IDNAME)
+    kmi = prefs.find_user_kmi(entry) if entry else None
+
+    valid = adjust_valid(context)
+    mode = adjust_mode()
+    if face_only_mode(context) and not (valid and mode == 'FACE'):
+        layout.label(text="Alt+클릭으로 면 루프를 선택하세요", icon='INFO')
+        layout.label(text="(Blender 기본 면 루프 선택)")
+        layout.label(text="고른 면 줄의 폭·길이를")
+        layout.label(text="이 패널에서 조절할 수 있습니다")
+    elif not valid:
+        layout.label(text="Alt+클릭으로 루프를 선택하세요", icon='INFO')
+        layout.label(text="(엣지·버텍스 모드에서 동작)")
+        layout.label(text="선택을 바꾸면 이 패널은 쉬었다가")
+        layout.label(text="다음 루프 선택부터 다시 동작합니다")
+    elif mode == 'FACE':
+        # 면 모드: 기본 면 루프 선택으로 고른 줄. 폭 = 양옆에 붙일 나란한 줄 수, 길이 = 줄 안에서 남길 면 수.
+        adj = state.adjust
+        s = get_settings(context)
+        layout.label(text="면 루프 (Blender 기본 선택 기준)", icon='FACESEL')
+        layout.prop(s, "side_reference")
+        col = layout.column(align=True)
+        col.prop(s, "adjust_up", text="폭: 시계 방향 (줄 수)")
+        col.prop(s, "adjust_down", text="폭: 반시계 방향 (줄 수)")
+        col.prop(s, "adjust_length", text=f"길이: 면 수 (전체 {adj['total']})")
+        layout.operator(FACE_ADJUST_IDNAME, text="기본 선택으로 초기화", icon='LOOP_BACK').target = 'RESET'
+    else:
+        adj = state.adjust
+        p = adj['params']
+        ring = p['use_ring']
+
+        layout.operator(ADJUST_IDNAME, text="링 (Ring)", icon='MOD_ARRAY', depress=ring).target = 'RING'
+
+        # 숫자칸: 클릭 드래그, 좌우 화살표, 더블클릭 입력이 모두 된다. (값은 state.adjust 와 항상 일치)
+        s = get_settings(context)
+        layout.prop(s, "side_reference")
+        col = layout.column(align=True)
+        col.enabled = not ring        # 링은 폭/길이를 쓰지 않는다
+        col.prop(s, "adjust_up")
+        col.prop(s, "adjust_down")
+        total = adj['total']
+        col.prop(s, "adjust_length", text=f"길이: 엣지 수 (전체 {total})")
+        col.operator(ADJUST_IDNAME, text="폭·길이 초기화", icon='LOOP_BACK').target = 'RESET'
+
+    layout.separator()
+    if kmi is not None:
+        row = layout.row(align=True)
+        row.label(text="열기/닫기")
+        row.label(text=prefs.key_text(kmi))
+        layout.prop(kmi, "type", text="", full_event=True)
+        conflicts = prefs.find_conflicts(kmi)
+        if conflicts:
+            layout.label(text="겹침: " + ", ".join(conflicts), icon='ERROR')
+
+
+class VIEW3D_PT_mirror_loop_adjust(bpy.types.Panel):
+    bl_label = "Mirror Loop"
+    bl_idname = "VIEW3D_PT_mirror_loop_adjust"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = "Mirror Loop"
+
+    @classmethod
+    def poll(cls, context):
+        return context.mode == 'EDIT_MESH'
+
+    def draw(self, context):
+        draw_adjust(self.layout, context)
+
+
+class VIEW3D_PT_mirror_loop_adjust_options(bpy.types.Panel):
+    """루프를 따라가는 규칙. (예전에는 Alt+클릭 직후 왼쪽 아래 '마지막 작업' 패널에 있던 옵션)
+    모든 루프 선택이 같은 값을 쓰므로 다른 작업의 옵션과 섞이지 않는다."""
+    bl_label = "루프 따라가기 옵션"
+    bl_idname = "VIEW3D_PT_mirror_loop_adjust_options"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = "Mirror Loop"
+    bl_parent_id = "VIEW3D_PT_mirror_loop_adjust"
+    bl_options = {'DEFAULT_CLOSED'}
+
+    @classmethod
+    def poll(cls, context):
+        return context.mode == 'EDIT_MESH'
+
+    def draw(self, context):
+        s = get_settings(context)
+        if s is None:
+            return
+        col = self.layout.column(align=True)
+        col.prop(s, "max_turn_angle")
+        col.prop(s, "use_dihedral")
+        self.layout.label(text="바꾸면 방금 고른 루프를 다시 계산합니다")
+
+
 class MESH_MT_mirror_loop_level(bpy.types.Menu):
     bl_label = "Mirror Loop Select"
     bl_idname = "MESH_MT_mirror_loop_level"
@@ -282,6 +264,152 @@ class VIEW3D_PT_mirror_loop_select(bpy.types.Panel):
             draw_panel_body(self.layout.column(align=True), s)
 
 
+class VIEW3D_PT_mirror_loop_similar(bpy.types.Panel):
+    """같은 모양 면 선택: 기어, 나사 머리처럼 평평한 같은 모양의 면을 한 번에 고른다.
+    (예전에는 실행 직후 왼쪽 아래 '마지막 작업' 패널에 있던 옵션. 이제 여기서 바꾸면 바로 다시 찾는다.)"""
+    bl_label = "같은 모양 면 선택"
+    bl_idname = "VIEW3D_PT_mirror_loop_similar"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = "Mirror Loop"
+
+    @classmethod
+    def poll(cls, context):
+        return context.mode == 'EDIT_MESH'
+
+    def draw(self, context):
+        s = get_settings(context)
+        if s is None:
+            return
+        layout = self.layout
+        layout.operator("mesh.mirror_face_similar", text="선택한 면과 같은 모양 찾기", icon='FACESEL')
+        info = state.similar
+        if info is not None and similar_valid(context):
+            layout.label(text="같은 모양 %d곳 (면 %d개)" % (info['regions'], info['faces']), icon='CHECKMARK')
+        else:
+            layout.label(text="면을 선택하거나 Alt+더블클릭하세요")
+        layout.prop(s, "similar_mode", text="")
+        col = layout.column(align=True)
+        col.prop(s, "similar_extend")
+        col.prop(s, "similar_scale_invariant")
+        if s.similar_mode == 'PATCH':
+            # 경계 엣지 루프 방식: 덩어리를 끊는 각도와 곡선 허용 오차
+            col = layout.column(align=True)
+            col.prop(s, "similar_patch_angle")
+            col.prop(s, "similar_curve_tolerance")
+        else:
+            col.prop(s, "similar_use_island")
+            col = layout.column(align=True)
+            col.prop(s, "similar_length_tolerance")
+            col.prop(s, "similar_angle_tolerance")
+            col.prop(s, "similar_flat_angle")
+        layout.label(text="옵션을 바꾸면 같은 기준 면으로 다시 찾습니다")
+
+
+class VIEW3D_PT_mirror_loop_similar_edge(bpy.types.Panel):
+    """같은 모양 엣지 루프: 톱니바퀴 림처럼 뾰족한 윤곽의 엣지 루프를 다른 곳에서 찾는다. (베벨, 버텍스 수, 회전, 크기가 달라도)"""
+    bl_label = "같은 모양 엣지 루프"
+    bl_idname = "VIEW3D_PT_mirror_loop_similar_edge"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = "Mirror Loop"
+
+    @classmethod
+    def poll(cls, context):
+        return context.mode == 'EDIT_MESH'
+
+    def draw(self, context):
+        s = get_settings(context)
+        if s is None:
+            return
+        layout = self.layout
+        if face_only_mode(context):
+            layout.label(text="엣지(또는 버텍스) 모드에서 쓸 수 있습니다", icon='INFO')
+            return
+        layout.operator("mesh.mirror_edge_similar", text="선택한 루프와 같은 모양 찾기", icon='EDGESEL')
+        info = state.similar_edge
+        if info is not None and similar_edge_valid(context):
+            layout.label(text="같은 모양 루프 %d개" % info['loops'], icon='CHECKMARK')
+        else:
+            layout.label(text="Alt+클릭으로 루프를 고른 뒤 누르세요")
+        col = layout.column(align=True)
+        col.prop(s, "edge_similar_extend")
+        col.prop(s, "edge_similar_scale_invariant")
+        col = layout.column(align=True)
+        col.prop(s, "edge_similar_shape_tol")
+        col.prop(s, "edge_similar_size_tol")
+        layout.label(text="옵션을 바꾸면 같은 루프로 다시 찾습니다")
+
+
+class VIEW3D_PT_mirror_loop_spread(bpy.types.Panel):
+    """퍼뜨리기: 버텍스에서 한 칸씩 이어 붙여 선택한다(Select More 와 같은 원리). Seam / Sharp 마크 엣지를 만나면 거기까지만 선택한다."""
+    bl_label = "퍼뜨리기 (Seam/Sharp까지)"
+    bl_idname = "VIEW3D_PT_mirror_loop_spread"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = "Mirror Loop"
+
+    @classmethod
+    def poll(cls, context):
+        return context.mode == 'EDIT_MESH'
+
+    def draw(self, context):
+        s = get_settings(context)
+        if s is None:
+            return
+        layout = self.layout
+        layout.operator("mesh.mirror_net_spread", text="선택한 버텍스에서 퍼뜨리기", icon='MOD_MESHDEFORM')
+        info = state.spread
+        if info is not None and not info.get('pending') and spread_valid(context):
+            layout.label(text="%d단계까지 · 버텍스 %d · 엣지 %d · 면 %d" % (info['levels'], info['verts'], info['edges'], info['faces']),
+                         icon='CHECKMARK')
+            layout.label(text="마크에서 멈춘 엣지 %d개" % info['blocked'])
+        else:
+            layout.label(text="버텍스를 고르거나 Alt+우클릭하세요")
+        col = layout.column(align=True)
+        sub = col.row(align=True)
+        sub.enabled = not s.net_unlimited
+        sub.prop(s, "net_steps")
+        col.prop(s, "net_unlimited")
+        col.prop(s, "net_face_step")
+        col = layout.column(align=True)
+        col.prop(s, "net_stop_seam")
+        col.prop(s, "net_stop_sharp")
+        col.prop(s, "net_extend")
+        layout.label(text="퍼뜨린 직후 Alt+휠로도 단계를 바꿉니다")
+
+
+class VIEW3D_PT_mirror_loop_marked(bpy.types.Panel):
+    """마크 엣지만 선택: 선택한 범위(선택이 없으면 전체)에서 Seam / Sharp 로 마크한 엣지만 남기는 토글 버튼."""
+    bl_label = "마크 엣지만 선택"
+    bl_idname = "VIEW3D_PT_mirror_loop_marked"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = "Mirror Loop"
+
+    @classmethod
+    def poll(cls, context):
+        return context.mode == 'EDIT_MESH'
+
+    def draw(self, context):
+        layout = self.layout
+        if not edge_mode(context):
+            layout.label(text="엣지 모드에서 쓸 수 있습니다", icon='INFO')
+            return
+        info = state.marked
+        active = info['kind'] if info is not None and marked_valid(context) else None   # 큰 메시는 가볍게만 확인한다
+        col = layout.column(align=True)
+        icons = {'SEAM': 'MOD_EDGESPLIT', 'SHARP': 'SHARPCURVE', 'BOTH': 'EDGESEL'}
+        for ident, name, _desc in MARK_KINDS:
+            op = col.operator("mesh.mirror_select_marked", text=name, icon=icons[ident], depress=(active == ident))
+            op.kind = ident
+        if active is not None:
+            layout.label(text="%d개 선택 · 한 번 더 누르면 원래 선택" % info['n'], icon='CHECKMARK')
+        else:
+            layout.label(text="드래그 / A 로 범위를 선택한 뒤 누르세요")
+            layout.label(text="(선택이 없으면 전체에서 찾습니다)")
+
+
 def draw_header_button(self, context):
     """3D 뷰포트 헤더(편집 모드)에 현재 단계를 보여주는 버튼."""
     if context.mode != 'EDIT_MESH':
@@ -289,11 +417,9 @@ def draw_header_button(self, context):
     s = get_settings(context)
     if s is None:
         return
-    armed = state.armed
     self.layout.popover(
         panel=VIEW3D_PT_mirror_loop_select.__name__,
-        text=("클릭 대기: " + armed['title']) if armed else LEVEL_SHORT[s.level],
-        icon='RESTRICT_SELECT_OFF' if armed else LEVEL_ICON[s.level])
+        text=LEVEL_SHORT[s.level], icon=LEVEL_ICON[s.level])
 
 
 def draw_context_menu(self, context):
@@ -308,8 +434,11 @@ def draw_context_menu(self, context):
 
 
 def draw_select_similar(self, context):
-    """Shift+G (Select Similar) 메뉴에 '모양' 항목을 붙인다. 선택한 면과 같은 모양의 면을 찾는다."""
-    self.layout.operator("mesh.mirror_face_similar", text="모양 (Shape)")
+    """Shift+G (Select Similar) 메뉴에 '모양' 항목을 붙인다. 면 모드면 같은 모양의 면, 엣지/버텍스 모드면 같은 모양의 엣지 루프."""
+    if face_only_mode(context):
+        self.layout.operator("mesh.mirror_face_similar", text="모양 (Shape)")
+    else:
+        self.layout.operator("mesh.mirror_edge_similar", text="모양 (Shape)")
 
 
 def register_hooks():
@@ -335,16 +464,16 @@ KEYMAPS = (
     (MESH_OT_mirror_loop_level.bl_idname, 'NONE', 'PRESS', {}, {'level': 'CYCLE'},
      "확장 단계 순환",
      "끔→1단계→2단계 전환, 기본 키 없음"),
-    # 내부용(제목 없음 = 목록에 안 보임): 메뉴에서 대기시킨 기능을 다음 클릭에 실행 / Esc 로 취소.
-    # 대기 중이 아니면 poll 이 실패해서 평소 클릭과 Esc 는 그대로 동작한다.
-    (MESH_OT_mirror_armed_click.bl_idname, 'LEFTMOUSE', 'PRESS', {}, {'cancel': False}, None, None),
-    (MESH_OT_mirror_armed_click.bl_idname, 'ESC', 'PRESS', {}, {'cancel': True}, None, None),
 )
 
 classes = (
     MESH_OT_mirror_loop_level,
-    MESH_OT_mirror_menu_run,
-    MESH_OT_mirror_armed_click,
     MESH_MT_mirror_loop_level,
     VIEW3D_PT_mirror_loop_select,
+    VIEW3D_PT_mirror_loop_adjust,
+    VIEW3D_PT_mirror_loop_adjust_options,
+    VIEW3D_PT_mirror_loop_similar,
+    VIEW3D_PT_mirror_loop_similar_edge,
+    VIEW3D_PT_mirror_loop_spread,
+    VIEW3D_PT_mirror_loop_marked,
 )
