@@ -16,16 +16,83 @@ edge_range.py — [엣지] 옆 루프로 선택 범위를 넓히고 줄이는 �
 """
 
 from .common import mesh_counts
-from .edge_core import find_mirror_edges, walk_loop
+from .edge_core import find_mirror_edges, trim_window, trimmed_loop, walk_loop
+from .edge_outline import region_outline
 from .face_core import opposite_edge
 
 
-def new_wheel_state(ob, bm, seed, loop_idxs, axes, threshold, cos_limit, dih):
+ADJUST_STEP_MAX = 50       # 폭(위/아래) 한 쪽의 최대 줄 수. 오퍼레이터 속성의 max 와 같다
+ADJUST_LENGTH_MIN = -200   # 길이 줄이기 한계. 오퍼레이터 속성의 min 과 같다
+
+
+def selected_loop(bm, seed, cos_limit, dih, length_adjust, axes, threshold):
+    """
+    씨앗의 루프를 걸어 '실제로 고를 엣지'를 정한다. (엣지 모드 선택과 면 모드 면 선택이 같이 쓴다)
+
+    length_adjust < 0 이면 클릭한 엣지를 가운데로 엣지를 (전체 + length_adjust)개만 남긴다.
+    줄이는 동안에는 미러 반대편을 쓰지 않는다.
+    반환: dict(loop, mirror, keep, ref_dir, total, full, axes)
+      loop/mirror : 고를 엣지 리스트, keep: 줄였을 때 남긴 수(안 줄였으면 0), total: 루프 전체 길이,
+      full : 줄이기 전 전체 루프의 엣지 인덱스 집합, axes : 실제로 쓴 미러 축
+    """
+    loop = walk_loop(seed, cos_limit, dih)
+    # 큰 평평한 영역의 날카로운 테두리인데 워커 결과가 틀렸다면(안쪽 쪼갠 선으로 새거나 모서리에서 멈춤)
+    # 그 영역의 경계를 루프로 확정한다. (edge_outline.py)
+    outline = region_outline(bm, seed, loop)
+    if outline is not None:
+        chain, pos, _closed = outline
+        total = len(chain)
+        keep, ref_dir, loop = 0, None, chain
+        if length_adjust < 0:
+            keep = max(1, total + length_adjust)
+            if keep < total:
+                loop = trim_window(chain, pos, True, keep)
+                v0 = (set(chain[0].verts) - set(chain[1].verts)).pop() if total > 1 else chain[0].verts[0]
+                ref_dir = chain[0].other_vert(v0).co - v0.co
+            else:
+                keep = 0
+        return {'loop': loop, 'mirror': [], 'keep': keep, 'ref_dir': ref_dir,
+                'total': total, 'full': {e.index for e in chain}, 'axes': [], 'outline': True}
+
+    full = {e.index for e in loop}
+    total = len(loop)
+    keep, ref_dir = 0, None
+    if length_adjust < 0:
+        keep = max(1, total + length_adjust)
+        if keep < total:
+            loop, _n, ref_dir = trimmed_loop(seed, cos_limit, dih, keep)
+            axes = []
+        else:
+            keep = 0
+    mirror = find_mirror_edges(bm, loop, axes, threshold, cos_limit, dih) if axes else []
+    return {'loop': loop, 'mirror': mirror, 'keep': keep, 'ref_dir': ref_dir,
+            'total': total, 'full': full, 'axes': axes, 'outline': False}
+
+
+def build_sides(bm, st, steps_up, steps_down):
+    """위/아래로 steps 만큼 옆 루프를 계산해 상태에 기록한다. (선택은 바꾸지 않는다) 실제로 만든 (lo, hi)."""
+    lo = hi = 0
+    for k in range(1, steps_up + 1):
+        if not build_offset(bm, st, k):
+            break
+        hi = k
+    for k in range(1, steps_down + 1):
+        if not build_offset(bm, st, -k):
+            break
+        lo = -k
+    return lo, hi
+
+
+def new_wheel_state(ob, bm, seed, loop_idxs, axes, threshold, cos_limit, dih, full_idxs=None):
     """
     Alt+클릭으로 루프를 고른 직후의 휠 확장 상태를 만든다. (state.set_wheel 에 넘긴다)
 
     loop_idxs : 시작 루프(+미러 반대편)의 엣지 인덱스 집합. 오프셋 0.
     호출하는 쪽에서 bm 의 인덱스(ensure_tables)가 최신인 상태여야 한다.
+
+    full_idxs : 길이를 줄이기 전의 전체 루프 엣지 인덱스. (줄이지 않았으면 loop_idxs 와 같다)
+                '한 바퀴 돌아 이미 선택한 루프로 돌아왔는지' 판정에 쓴다.
+    상태에 keep(루프마다 남길 엣지 수)과 ref_dir 을 넣으면 build_offset 이 나란한 루프도 같은 길이로 자른다.
     """
     return {
         'ob': ob.name,
@@ -40,6 +107,9 @@ def new_wheel_state(ob, bm, seed, loop_idxs, axes, threshold, cos_limit, dih):
         'seeds': {0: seed.index},
         'faces': {},   # 오프셋 -> (뒤쪽 면 인덱스, 앞쪽 면 인덱스). 0번은 첫 휠에서 결정
         'loops': {0: loop_idxs},
+        'full': {0: set(full_idxs if full_idxs is not None else loop_idxs)},
+        'keep': 0,
+        'ref_dir': None,
     }
 
 
@@ -58,8 +128,8 @@ def build_offset(bm, st, k):
     new = opposite_edge(face, bm.edges[st['seeds'][base]])
     if new is None or new.hide:
         return False
-    # 한 바퀴 돌아 이미 선택한 루프로 돌아온 경우
-    if any(new.index in idxs for idxs in st['loops'].values()):
+    # 한 바퀴 돌아 이미 선택한 루프로 돌아온 경우 (길이를 줄였어도 전체 루프 기준으로 본다)
+    if any(new.index in idxs for idxs in st.get('full', st['loops']).values()):
         return False
 
     others = [f for f in new.link_faces if f is not face and not f.hide]
@@ -68,12 +138,41 @@ def build_offset(bm, st, k):
     st['seeds'][k] = new.index
 
     loop = walk_loop(new, st['cos_limit'], st['dih'])
-    idxs = {e.index for e in loop}
-    if st['axes']:
-        idxs.update(e.index for e in find_mirror_edges(
-            bm, loop, st['axes'], st['threshold'], st['cos_limit'], st['dih'], st.get('cache')))
+    full = {e.index for e in loop}
+    if st.get('keep'):
+        # 길이를 줄인 상태: 나란한 루프도 씨앗(맞은편 엣지)을 가운데로 같은 개수만 남긴다.
+        # (미러 반대편은 자른 구간과 대응시키기 어려워 쓰지 않는다)
+        window, _n, _d = trimmed_loop(new, st['cos_limit'], st['dih'], st['keep'], st.get('ref_dir'))
+        idxs = {e.index for e in window}
+    else:
+        idxs = set(full)
+        if st['axes']:
+            idxs.update(e.index for e in find_mirror_edges(
+                bm, loop, st['axes'], st['threshold'], st['cos_limit'], st['dih'], st.get('cache')))
+    if 'full' in st:
+        st['full'][k] = full
     st['loops'][k] = idxs
     return True
+
+
+def ring_edges(seed):
+    """
+    seed 의 링(ring): 사각형 면을 가로질러 맞은편 엣지를 양쪽으로 계속 따라간 엣지 집합.
+    루프가 '진행 방향'으로 이어지는 엣지라면, 링은 그와 직각으로 나란히 쌓인 엣지 한 줄이다.
+    삼각형/N-gon, 경계, 숨긴 엣지를 만나면 그쪽에서 멈추고, 한 바퀴 돌아오면 거기서 끝난다.
+    (폭 최대 + 길이 1 과 같은 결과를 한 줄씩 루프를 걷지 않고 얻는다. 제한이 없고 빠르다.)
+    """
+    seen = {seed}
+    for start in [f for f in seed.link_faces if not f.hide][:2]:
+        e, f = seed, start
+        while f is not None:
+            new = opposite_edge(f, e)
+            if new is None or new.hide or new in seen:
+                break
+            seen.add(new)
+            nxt = [g for g in new.link_faces if g is not f and not g.hide]
+            e, f = new, (nxt[0] if nxt else None)
+    return seen
 
 
 def desired_for(st, lo, hi):
